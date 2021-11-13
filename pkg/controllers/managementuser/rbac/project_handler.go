@@ -118,7 +118,16 @@ func (p *pLifecycle) ensureNamespacesAssigned(project *v3.Project) error {
 	}
 
 	_, err = p.m.workload.Management.Management.Clusters("").Update(cluster)
+	if err != nil {
+		return err
+	}
 
+	// Update project after cluster, otherwise Updated could be called twice
+	if _, ok := project.Labels["authz.management.cattle.io/namespaces-stale"]; !ok {
+		return nil
+	}
+	delete(project.Labels, "authz.management.cattle.io/namespaces-stale")
+	_, err = p.m.workload.Management.Management.Projects(cluster.Name).Update(project)
 	return err
 }
 

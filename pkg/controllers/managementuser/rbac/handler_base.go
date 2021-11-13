@@ -97,7 +97,23 @@ func Register(ctx context.Context, workload *config.UserContext) {
 		prtbs:               workload.Management.Management.ProjectRoleTemplateBindings(""),
 		clusterName:         workload.ClusterName,
 	}
-	workload.Management.Management.Projects(workload.ClusterName).AddClusterScopedLifecycle(ctx, "project-namespace-auth", workload.ClusterName, newProjectLifecycle(r))
+	p := newProjectLifecycle(r)
+	workload.Management.Management.Projects(workload.ClusterName).AddClusterScopedLifecycle(ctx, "project-namespace-auth", workload.ClusterName, p)
+	defer func() {
+		go func() {
+			staleProjects, err := p.m.projectLister.List(workload.ClusterName, labels.Set{
+				"authz.management.cattle.io/namespaces-stale": "true",
+			}.AsSelector())
+			if err != nil {
+				// log
+			}
+			for _, p := range staleProjects {
+				workload.Management.Management.Projects(workload.ClusterName).Controller().Enqueue(workload.ClusterName, p.Name)
+			}
+		}()
+	}()
+
+
 	workload.Management.Management.ProjectRoleTemplateBindings("").AddClusterScopedLifecycle(ctx, "cluster-prtb-sync", workload.ClusterName, newPRTBLifecycle(r))
 	workload.RBAC.ClusterRoles("").AddHandler(ctx, "cluster-clusterrole-sync", newClusterRoleHandler(r).sync)
 	workload.RBAC.ClusterRoleBindings("").AddHandler(ctx, "legacy-crb-cleaner-sync", newLegacyCRBCleaner(r).sync)

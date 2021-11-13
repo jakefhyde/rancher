@@ -181,7 +181,7 @@ func copyCAAdditionalSecret(secretClient controllerv1.SecretClient) error {
 
 }
 
-func forceSystemNamespaceAssignment(configMapController controllerv1.ConfigMapController, clusterClient v3.ClusterClient) error {
+func forceSystemNamespaceAssignment(configMapController controllerv1.ConfigMapController, clusterClient v3.ClusterClient, projectClient v3.ProjectClient) error {
 	cm, err := getConfigMap(configMapController, forceSystemNamespacesAssignment)
 	if err != nil || cm == nil {
 		return err
@@ -204,8 +204,24 @@ func forceSystemNamespaceAssignment(configMapController controllerv1.ConfigMapCo
 			}
 			v32.ClusterConditionSystemNamespacesAssigned.Unknown(c)
 			v32.ClusterConditionDefaultNamespaceAssigned.Unknown(c)
-			_, err = clusterClient.Update(c)
-			return err
+			if _, err := clusterClient.Update(c); err != nil {
+				return err
+			}
+			d, err := projectClient.List(c.Name, metav1.ListOptions{
+				LabelSelector: "authz.management.cattle.io/default-project=true",
+			})
+			if err == nil && len(d.Items) > 0 {
+				d.Items[0].Labels["authz.management.cattle.io/namespaces-stale"] = "true"
+				_, _ = projectClient.Update(&d.Items[0])
+			}
+			s, err := projectClient.List(c.Name, metav1.ListOptions{
+				LabelSelector: "authz.management.cattle.io/system-project=true",
+			})
+			if err == nil && len(s.Items) > 0 {
+				d.Items[0].Labels["authz.management.cattle.io/namespaces-stale"] = "true"
+				_, _ = projectClient.Update(&d.Items[0])
+			}
+			return nil
 		}); err != nil {
 			return err
 		}
