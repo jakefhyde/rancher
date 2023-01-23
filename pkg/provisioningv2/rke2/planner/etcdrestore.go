@@ -29,7 +29,7 @@ func (p *Planner) resetEtcdSnapshotRestoreState(status rkev1.RKEControlPlaneStat
 }
 
 func (p *Planner) startOrRestartEtcdSnapshotRestore(status rkev1.RKEControlPlaneStatus, restore *rkev1.ETCDSnapshotRestore) (rkev1.RKEControlPlaneStatus, error) {
-	if restore == nil || !equality.Semantic.DeepEqual(*restore, *status.ETCDSnapshotRestore) {
+	if restore == nil || status.ETCDSnapshotRestore == nil || !equality.Semantic.DeepEqual(*restore, *status.ETCDSnapshotRestore) {
 		return p.setEtcdSnapshotRestoreState(status, restore, rkev1.ETCDSnapshotPhaseStarted)
 	}
 	return status, nil
