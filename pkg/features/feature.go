@@ -65,6 +65,12 @@ var (
 		true,
 		false,
 		false)
+	EmbeddedClusterAPIProviders = newFeature(
+		"embedded-cluster-api-providers",
+		"Enable an embedded instance of cluster-api provider controllers",
+		true,
+		false,
+		false)
 	RKE2 = newFeature(
 		"rke2",
 		"Enable provisioning of RKE2",

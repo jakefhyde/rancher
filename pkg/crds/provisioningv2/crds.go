@@ -22,8 +22,14 @@ var (
 		"MachineSet":         true,
 		"Cluster":            true,
 	}
+	capiDOCRDs = map[string]bool{
+		"DOCluster":         true,
+		"DOClusterTemplate": true,
+		"DOMachine":         true,
+		"DOMachineTemplate": true,
+	}
 
-	//go:embed capi-crds.yaml capi-webhooks.yaml
+	//go:embed capi-crds.yaml capi-webhooks.yaml capi-do-crds.yaml
 	capiData embed.FS
 )
 
@@ -34,6 +40,9 @@ func List() (result []crd.CRD) {
 	}
 	if features.EmbeddedClusterAPI.Enabled() {
 		result = append(result, capi()...)
+	}
+	if features.EmbeddedClusterAPIProviders.Enabled() {
+		result = append(result, capiDO()...)
 	}
 	return
 }
@@ -135,8 +144,8 @@ func capiWebhooks() []runtime.Object {
 	return objs
 }
 
-func capi() []crd.CRD {
-	f, err := capiData.Open("capi-crds.yaml")
+func loadEmbeddedCRDs(file string, load map[string]bool) []crd.CRD {
+	f, err := capiData.Open(file)
 	if err != nil {
 		panic(err)
 	}
@@ -153,7 +162,7 @@ func capi() []crd.CRD {
 			continue
 		}
 		if unstr, ok := obj.(*unstructured.Unstructured); ok &&
-			capiCRDs[data.Object(unstr.Object).String("spec", "names", "kind")] {
+			load[data.Object(unstr.Object).String("spec", "names", "kind")] {
 			labels := unstr.GetLabels()
 			if labels == nil {
 				labels = map[string]string{}
@@ -167,6 +176,14 @@ func capi() []crd.CRD {
 	}
 
 	return result
+}
+
+func capi() []crd.CRD {
+	return loadEmbeddedCRDs("capi-crds.yaml", capiCRDs)
+}
+
+func capiDO() []crd.CRD {
+	return loadEmbeddedCRDs("capi-do-crds.yaml", capiDOCRDs)
 }
 
 func newRKECRD(obj interface{}, customize func(crd.CRD) crd.CRD) crd.CRD {
