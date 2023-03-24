@@ -144,7 +144,7 @@ func capiWebhooks() []runtime.Object {
 	return objs
 }
 
-func loadEmbeddedCRDs(file string, load map[string]bool) []crd.CRD {
+func loadEmbeddedCRDs(file string, load map[string]bool, infra bool) []crd.CRD {
 	f, err := capiData.Open(file)
 	if err != nil {
 		panic(err)
@@ -168,6 +168,9 @@ func loadEmbeddedCRDs(file string, load map[string]bool) []crd.CRD {
 				labels = map[string]string{}
 			}
 			labels["auth.cattle.io/cluster-indexed"] = "true"
+			if infra {
+				labels["cluster.x-k8s.io/v1beta1"] = "v1beta1"
+			}
 			unstr.SetLabels(labels)
 			result = append(result, crd.CRD{
 				Override: obj,
@@ -179,11 +182,11 @@ func loadEmbeddedCRDs(file string, load map[string]bool) []crd.CRD {
 }
 
 func capi() []crd.CRD {
-	return loadEmbeddedCRDs("capi-crds.yaml", capiCRDs)
+	return loadEmbeddedCRDs("capi-crds.yaml", capiCRDs, false)
 }
 
 func capiDO() []crd.CRD {
-	return loadEmbeddedCRDs("capi-do-crds.yaml", capiDOCRDs)
+	return loadEmbeddedCRDs("capi-do-crds.yaml", capiDOCRDs, true)
 }
 
 func newRKECRD(obj interface{}, customize func(crd.CRD) crd.CRD) crd.CRD {

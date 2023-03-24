@@ -599,6 +599,19 @@ func (p *Planner) addConfigFile(nodePlan plan.NodePlan, controlPlane *rkev1.RKEC
 
 	PruneEmpty(config)
 
+	providerId := entry.Machine.Spec.ProviderID
+	if providerId == nil {
+		return nodePlan, config, ErrWaitingf("Waiting for provider ID to be set for %s/%s", entry.Machine.Namespace, entry.Machine.Name)
+	}
+
+	providerIdFlag := fmt.Sprintf("provider-id=%s", *entry.Machine.Spec.ProviderID)
+	if kubeletArg, ok := config["kubelet-arg"]; ok {
+		kubeletArgSlice := kubeletArg.([]string)
+		config["kubelet-arg"] = append(kubeletArgSlice, providerIdFlag)
+	} else {
+		config["kubelet-arg"] = []string{providerIdFlag}
+	}
+
 	configData, err := json.MarshalIndent(config, "", "  ")
 	if err != nil {
 		return nodePlan, config, err

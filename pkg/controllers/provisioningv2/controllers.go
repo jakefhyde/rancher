@@ -23,6 +23,7 @@ import (
 	"github.com/rancher/rancher/pkg/controllers/provisioningv2/rke2/unmanaged"
 	"github.com/rancher/rancher/pkg/features"
 	"github.com/rancher/rancher/pkg/provisioningv2/capi"
+	"github.com/rancher/rancher/pkg/provisioningv2/capi/do"
 	"github.com/rancher/rancher/pkg/provisioningv2/kubeconfig"
 	planner2 "github.com/rancher/rancher/pkg/provisioningv2/rke2/planner"
 	"github.com/rancher/rancher/pkg/wrangler"
@@ -57,6 +58,20 @@ func Register(ctx context.Context, clients *wrangler.Context) error {
 		rkecontrolplane.Register(ctx, clients)
 		managesystemagent.Register(ctx, clients)
 		machinedrain.Register(ctx, clients)
+	}
+
+	if features.EmbeddedClusterAPIProviders.Enabled() {
+		doStart, err := do.Register(ctx, clients)
+		if err != nil {
+			return err
+		}
+		clients.OnLeader(func(ctx context.Context) error {
+			if err := doStart(ctx); err != nil {
+				logrus.Fatal(err)
+			}
+			logrus.Info("Cluster API DO provider is started")
+			return nil
+		})
 	}
 
 	if features.EmbeddedClusterAPI.Enabled() {

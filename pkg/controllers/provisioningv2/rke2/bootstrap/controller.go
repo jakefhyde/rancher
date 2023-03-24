@@ -223,11 +223,11 @@ func (h *handler) getEnvVar(bootstrap *rkev1.RKEBootstrap, capiCluster *capi.Clu
 	return result, nil
 }
 
+// Do not delete while pending, provisioning, provisioned, or running
 func (h *handler) assignBootStrapSecret(machine *capi.Machine, bootstrap *rkev1.RKEBootstrap, capiCluster *capi.Cluster) (*corev1.Secret, []runtime.Object, error) {
-	if capi.MachinePhase(machine.Status.Phase) != capi.MachinePhasePending &&
-		capi.MachinePhase(machine.Status.Phase) != capi.MachinePhaseDeleting &&
-		capi.MachinePhase(machine.Status.Phase) != capi.MachinePhaseFailed &&
-		capi.MachinePhase(machine.Status.Phase) != capi.MachinePhaseProvisioning {
+	if capi.MachinePhase(machine.Status.Phase) == capi.MachinePhaseDeleting &&
+		capi.MachinePhase(machine.Status.Phase) == capi.MachinePhaseDeleted &&
+		capi.MachinePhase(machine.Status.Phase) == capi.MachinePhaseFailed {
 		return nil, nil, nil
 	}
 
