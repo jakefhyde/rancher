@@ -175,18 +175,37 @@ func toMachineTemplate(machinePoolName string, cluster *rancherv1.Cluster, machi
 		machinePoolData.SetNested(secretName, "common", "cloudCredentialSecretName")
 	}
 
+	annotations := map[string]any{
+		rke2.MachineTemplateClonedFromGroupVersionAnn: gvk.GroupVersion().String(),
+		rke2.MachineTemplateClonedFromKindAnn:         gvk.Kind,
+		rke2.MachineTemplateClonedFromNameAnn:         machinePool.NodeConfig.Name,
+	}
+
+	hostnameLimit := 0
+	if hl := machinePool.HostnameLengthLimit; hl >= rke2.MinimumHostnameLengthLimit && hl <= rke2.MaximumHostnameLengthLimit {
+		hostnameLimit = hl
+	} else if hl = cluster.Spec.RKEConfig.MachinePoolDefaults.HostnameLengthLimit; hl >= rke2.MinimumHostnameLengthLimit && hl <= rke2.MaximumHostnameLengthLimit {
+		hostnameLimit = hl
+	}
+
+	if hostnameLimit != 0 {
+		annotations[rke2.HostnameLengthLimitAnnotation] = machinePool.HostnameLengthLimit
+	}
+
+	if machinePool.HostnameLengthLimit < rke2.MinimumHostnameLengthLimit {
+		logrus.Debugf("rkecluster %s/%s: skipping adding %s as value is lower than %d", cluster.Namespace, cluster.Name, rke2.HostnameLengthLimitAnnotation, rke2.MinimumHostnameLengthLimit)
+	} else {
+		annotations[rke2.HostnameLengthLimitAnnotation] = machinePool.HostnameLengthLimit
+	}
+
 	ustr := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"kind":       strings.TrimSuffix(kind, "Config") + "MachineTemplate",
 			"apiVersion": rke2.RKEMachineAPIVersion,
 			"metadata": map[string]interface{}{
-				"annotations": map[string]interface{}{
-					rke2.MachineTemplateClonedFromGroupVersionAnn: gvk.GroupVersion().String(),
-					rke2.MachineTemplateClonedFromKindAnn:         gvk.Kind,
-					rke2.MachineTemplateClonedFromNameAnn:         machinePool.NodeConfig.Name,
-				},
-				"name":      machinePoolName,
-				"namespace": cluster.Namespace,
+				"annotations": annotations,
+				"name":        machinePoolName,
+				"namespace":   cluster.Namespace,
 				"labels": map[string]interface{}{
 					apply.LabelPrune: "false",
 				},
