@@ -15,6 +15,7 @@ import (
 	"github.com/Masterminds/semver/v3"
 	"github.com/moby/locker"
 	"github.com/rancher/channelserver/pkg/model"
+	"github.com/rancher/lasso/pkg/dynamic"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1/plan"
@@ -60,8 +61,9 @@ const (
 	CertDirArgument                               = "cert-dir"
 	TLSCertFileArgument                           = "tls-cert-file"
 
-	authnWebhookFileName = "/var/lib/rancher/%s/kube-api-authn-webhook.yaml"
-	ConfigYamlFileName   = "/etc/rancher/%s/config.yaml.d/50-rancher.yaml"
+	authnWebhookFileName   = "/var/lib/rancher/%s/kube-api-authn-webhook.yaml"
+	ConfigYamlFileName     = "/etc/rancher/%s/config.yaml.d/50-rancher.yaml"
+	KubeletArgYamlFileName = "/etc/rancher/%s/config.yaml.d/40-rancher.yaml"
 
 	bootstrapTier    = "bootstrap"
 	etcdTier         = "etcd"
@@ -122,6 +124,7 @@ type Planner struct {
 	capiClusters                  capicontrollers.ClusterCache
 	managementClusters            mgmtcontrollers.ClusterCache
 	rancherClusterCache           ranchercontrollers.ClusterCache
+	dynamic                       *dynamic.Controller
 	locker                        locker.Locker
 	etcdS3Args                    s3Args
 	retrievalFunctions            InfoFunctions
@@ -159,6 +162,7 @@ func New(ctx context.Context, clients *wrangler.Context, functions InfoFunctions
 		rkeBootstrap:                  clients.RKE.RKEBootstrap(),
 		rkeBootstrapCache:             clients.RKE.RKEBootstrap().Cache(),
 		etcdSnapshotCache:             clients.RKE.ETCDSnapshot().Cache(),
+		dynamic:                       clients.Dynamic,
 		etcdS3Args: s3Args{
 			secretCache: clients.Core.Secret().Cache(),
 		},

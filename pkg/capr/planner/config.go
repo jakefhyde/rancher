@@ -1,6 +1,7 @@
 package planner
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -9,7 +10,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 
+	"github.com/Masterminds/sprig/v3"
 	"github.com/rancher/norman/types/values"
 	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1/plan"
@@ -21,7 +24,6 @@ import (
 	"github.com/rancher/wrangler/pkg/data/convert"
 	corecontrollers "github.com/rancher/wrangler/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/pkg/kv"
-	"github.com/rancher/wrangler/pkg/yaml"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,6 +31,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/yaml"
 )
 
 // addEtcd mutates the given config map with etcd-specific configuration elements, and adds S3-related arguments and files if renderS3 is true.
@@ -73,8 +77,64 @@ func addDefaults(config map[string]interface{}, controlPlane *rkev1.RKEControlPl
 	}
 }
 
-func addUserConfig(config map[string]interface{}, controlPlane *rkev1.RKEControlPlane, entry *planEntry) error {
-	for k, v := range controlPlane.Spec.MachineGlobalConfig.Data {
+var templateFuncMap = sprig.TxtFuncMap()
+
+func (p *Planner) addUserConfig(config map[string]interface{}, controlPlane *rkev1.RKEControlPlane, entry *planEntry) error {
+	globalYaml, err := yaml.Marshal(controlPlane.Spec.MachineGlobalConfig)
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	gv, err := schema.ParseGroupVersion(entry.Machine.Spec.InfrastructureRef.APIVersion)
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	gvk := schema.GroupVersionKind{
+		Group:   gv.Group,
+		Version: gv.Version,
+		Kind:    entry.Machine.Spec.InfrastructureRef.Kind,
+	}
+
+	infraMachine, err := p.dynamic.Get(gvk, entry.Machine.Spec.InfrastructureRef.Namespace, entry.Machine.Spec.InfrastructureRef.Name)
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	machineMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(entry.Machine)
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	infraMachineMap, err := runtime.DefaultUnstructuredConverter.ToUnstructured(infraMachine)
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	t, err := template.New("global").Funcs(templateFuncMap).Parse(string(globalYaml))
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	var buf bytes.Buffer
+	err = t.Execute(&buf, struct {
+		Machine               map[string]any
+		InfrastructureMachine map[string]any
+	}{
+		Machine:               machineMap,
+		InfrastructureMachine: infraMachineMap,
+	})
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	var parsedGlobalData rkev1.GenericMap
+	err = yaml.Unmarshal(buf.Bytes(), &parsedGlobalData)
+	if err != nil {
+		return fmt.Errorf("cannot add user config: %w", err)
+	}
+
+	for k, v := range parsedGlobalData.Data {
 		config[k] = v
 	}
 
@@ -190,16 +250,16 @@ func (p *Planner) addManifests(nodePlan plan.NodePlan, controlPlane *rkev1.RKECo
 	return nodePlan, nil
 }
 
-func isVSphereProvider(controlPlane *rkev1.RKEControlPlane, entry *planEntry) (bool, error) {
+func (p *Planner) isVSphereProvider(controlPlane *rkev1.RKEControlPlane, entry *planEntry) (bool, error) {
 	data := map[string]interface{}{}
-	if err := addUserConfig(data, controlPlane, entry); err != nil {
+	if err := p.addUserConfig(data, controlPlane, entry); err != nil {
 		return false, err
 	}
 	return data["cloud-provider-name"] == "rancher-vsphere", nil
 }
 
-func addVSphereCharts(controlPlane *rkev1.RKEControlPlane, entry *planEntry) (map[string]interface{}, error) {
-	if isVSphere, err := isVSphereProvider(controlPlane, entry); err != nil {
+func (p *Planner) addVSphereCharts(controlPlane *rkev1.RKEControlPlane, entry *planEntry) (map[string]interface{}, error) {
+	if isVSphere, err := p.isVSphereProvider(controlPlane, entry); err != nil {
 		return nil, err
 	} else if isVSphere && controlPlane.Spec.ChartValues.Data["rancher-vsphere-csi"] == nil {
 		// ensure we have this chart config so that the global.cattle.clusterId is set
@@ -234,7 +294,7 @@ func (p *Planner) addChartConfigs(nodePlan plan.NodePlan, controlPlane *rkev1.RK
 		return nodePlan, nil
 	}
 
-	chartValues, err := addVSphereCharts(controlPlane, entry)
+	chartValues, err := p.addVSphereCharts(controlPlane, entry)
 	if err != nil {
 		return nodePlan, err
 	}
@@ -266,7 +326,7 @@ func (p *Planner) addChartConfigs(nodePlan plan.NodePlan, controlPlane *rkev1.RK
 			},
 		})
 	}
-	contents, err := yaml.ToBytes(chartConfigs)
+	contents, err := yaml.Marshal(chartConfigs)
 	if err != nil {
 		return plan.NodePlan{}, err
 	}
@@ -553,7 +613,7 @@ func (p *Planner) addConfigFile(nodePlan plan.NodePlan, controlPlane *rkev1.RKEC
 	addDefaults(config, controlPlane)
 
 	// Must call addUserConfig first because it will filter out non-kdm data
-	if err := addUserConfig(config, controlPlane, entry); err != nil {
+	if err := p.addUserConfig(config, controlPlane, entry); err != nil {
 		return nodePlan, config, "", err
 	}
 
