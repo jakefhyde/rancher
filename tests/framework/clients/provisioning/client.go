@@ -6,14 +6,14 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-// Client is a struct that embedds the `ProvisioningV1Interface` (provisioning client) and has Session as an attribute
+// Client is a struct that embeds the `ProvisioningV1Interface` (provisioning client) and has Session as an attribute
 // The session.Session attributes is passed all way down to the Cluster
 type Client struct {
 	provisionClientV1.ProvisioningV1Interface
 	ts *session.Session
 }
 
-// Cluster is a struct that embedds ClusterInterface and has session.Session as an attribute to keep track of the resources created by ClusterInterface
+// Cluster is a struct that embeds ClusterInterface and has session.Session as an attribute to keep track of the resources created by ClusterInterface
 type Cluster struct {
 	provisionClientV1.ClusterInterface
 	ts *session.Session

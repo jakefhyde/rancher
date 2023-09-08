@@ -16,12 +16,8 @@ import (
 )
 
 const (
-	namespace                    = "fleet-default"
-	ProvisioningSteveResouceType = "provisioning.cattle.io.cluster"
-	machineSteveResourceType     = "cluster.x-k8s.io.machine"
-	machineSteveAnnotation       = "cluster.x-k8s.io/machine"
-	etcdLabel                    = "node-role.kubernetes.io/etcd"
-	clusterLabel                 = "cluster.x-k8s.io/cluster-name"
+	namespace                     = "fleet-default"
+	ProvisioningSteveResourceType = "provisioning.cattle.io.cluster"
 )
 
 // RotateCerts rotates the certificates in a cluster
@@ -36,7 +32,7 @@ func RotateCerts(client *rancher.Client, clusterName string) error {
 		return err
 	}
 
-	cluster, err := adminClient.Steve.SteveType(ProvisioningSteveResouceType).ByID("fleet-default/" + clusterName)
+	cluster, err := adminClient.Steve.SteveType(ProvisioningSteveResourceType).ByID(namespace + "/" + clusterName)
 	if err != nil {
 		return err
 	}
@@ -59,7 +55,7 @@ func RotateCerts(client *rancher.Client, clusterName string) error {
 
 	updatedCluster.Spec = *clusterSpec
 
-	_, err = client.Steve.SteveType(ProvisioningSteveResouceType).Update(cluster, updatedCluster)
+	_, err = client.Steve.SteveType(ProvisioningSteveResourceType).Update(cluster, updatedCluster)
 	if err != nil {
 		return err
 	}
@@ -85,7 +81,7 @@ func RotateCerts(client *rancher.Client, clusterName string) error {
 		return err
 	}
 
-	clusterWait, err := kubeProvisioningClient.Clusters("fleet-default").Watch(context.TODO(), metav1.ListOptions{
+	clusterWait, err := kubeProvisioningClient.Clusters(namespace).Watch(context.TODO(), metav1.ListOptions{
 		FieldSelector:  "metadata.name=" + clusterName,
 		TimeoutSeconds: &defaults.WatchTimeoutSeconds,
 	})
