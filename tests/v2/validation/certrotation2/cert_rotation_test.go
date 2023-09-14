@@ -2,26 +2,18 @@ package certrotation
 
 import (
 	"context"
-	"fmt"
-	"reflect"
-	"strings"
 	"testing"
 
-	provv1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
-	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/wrangler"
 	"github.com/rancher/rancher/tests/framework/clients/rancher"
-	v1 "github.com/rancher/rancher/tests/framework/clients/rancher/v1"
 	"github.com/rancher/rancher/tests/framework/extensions/kubeconfig"
 	"github.com/rancher/rancher/tests/framework/extensions/provisioninginput"
 	"github.com/rancher/rancher/tests/framework/pkg/config"
 	"github.com/rancher/rancher/tests/framework/pkg/session"
-	"github.com/rancher/wrangler/pkg/generic"
+	"github.com/rancher/rancher/tests/framework/pkg/steve"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/watch"
 )
 
 type V2ProvCertRotationTestSuite struct {
@@ -67,108 +59,45 @@ func (r *V2ProvCertRotationTestSuite) TestCertRotation() {
 		wranglerCtx, err := wrangler.NewContext(context.TODO(), *kubeConfig, r.client.RestConfig)
 		require.NoError(r.T(), err)
 
-		clusterClient := SteveClientFactory[*provv1.Cluster, *provv1.ClusterList](adminClient.Steve, wranglerCtx.Provisioning.Cluster(), NewGeneratorForType(provv1.NewCluster), &provv1.Cluster{})
-		rkeClient := SteveClientFactory[*rkev1.RKEControlPlane, *rkev1.RKEControlPlaneList](adminClient.Steve, wranglerCtx.RKE.RKEControlPlane(), NewGeneratorForType(rkev1.NewRKEControlPlane), &rkev1.RKEControlPlane{})
+		steveCtx, err := steve.NewContext(wranglerCtx, adminClient.Steve)
+		require.NoError(r.T(), err)
 
-		require.NoError(r.T(), RotateCerts(clusterName, clusterClient, rkeClient))
-		require.NoError(r.T(), RotateCerts(clusterName, clusterClient, rkeClient))
+		require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
+		require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
 	})
 }
 
-type GeneratorFunc[T comparable] func(string, string, T) T
+func (r *V2ProvCertRotationTestSuite) a() {
 
-func NewGeneratorForType[T any](f func(string, string, T) *T) GeneratorFunc[*T] {
-	return func(s string, s2 string, t *T) *T {
-		return f(s, s2, *t)
-	}
 }
+
+//// Option a, has the neatest interface
+//func (r *V2ProvCertRotationTestSuite) a() {
+//	wranglerCtx, err := wrangler.NewContext(context.TODO(), *kubeConfig, r.client.RestConfig)
+//	require.NoError(r.T(), err)
+//
+//	steveCtx, err := steve.NewContext(adminClient.Steve, wranglerCtx)
+//	require.NoError(r.T(), err)
+//
+//	require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
+//	require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
+//}
+//
+//// Option b, has the neatest interface
+//func (r *V2ProvCertRotationTestSuite) a() {
+//	wranglerCtx, err := wrangler.NewContext(context.TODO(), *kubeConfig, r.client.RestConfig)
+//	require.NoError(r.T(), err)
+//
+//	clusterClient := steve.ClientFactory[*provv1.Cluster, *provv1.ClusterList](adminClient.Steve, wranglerCtx.Provisioning.Cluster(), steve.NewGeneratorForType(provv1.NewCluster), &provv1.Cluster{})
+//	rkeClient := steve.ClientFactory[*rkev1.RKEControlPlane, *rkev1.RKEControlPlaneList](adminClient.Steve, wranglerCtx.RKE.RKEControlPlane(), steve.NewGeneratorForType(rkev1.NewRKEControlPlane), &rkev1.RKEControlPlane{})
+//
+//	steveCtx, err := steve.NewContext(adminClient.Steve, wranglerCtx)
+//	require.NoError(r.T(), err)
+//
+//	require.NoError(r.T(), RotateCerts(clusterName, steveCtx.ClusterClient, rkeClient))
+//	require.NoError(r.T(), RotateCerts(clusterName, clusterClient, rkeClient))
+//}
 
 func TestCertRotation(t *testing.T) {
 	suite.Run(t, new(V2ProvCertRotationTestSuite))
-}
-
-type SteveClient[T generic.RuntimeMetaObject, TList runtime.Object] struct {
-	generic.ClientInterface[T, TList]
-	client  generic.ClientInterface[T, TList]
-	steve   *v1.Client
-	objType reflect.Type
-	gen     GeneratorFunc[T]
-}
-
-func (s *SteveClient[T, TList]) Watch(namespace string, opts metav1.ListOptions) (watch.Interface, error) {
-	return s.client.Watch(namespace, opts)
-}
-
-func (s *SteveClient[T, TList]) Get(namespace, name string, opts metav1.GetOptions) (T, error) {
-	result := reflect.New(s.objType).Interface().(T)
-	result = s.gen(namespace, name, result)
-
-	gvk := result.GetObjectKind().GroupVersionKind()
-	steveType := fmt.Sprintf("%s.%s", gvk.Group, strings.ToLower(gvk.Kind))
-
-	apiObj, err := s.steve.SteveType(steveType).ByID(namespace + "/" + name)
-	if err != nil {
-		return result, err
-	}
-
-	err = v1.ConvertToK8sType(apiObj.JSONResp, result)
-	if err != nil {
-		return result, err
-	}
-
-	return result, nil
-}
-
-func (s *SteveClient[T, TList]) Create(t T) (T, error) {
-	result := reflect.New(s.objType).Interface().(T)
-	result = s.gen(t.GetNamespace(), t.GetName(), result)
-
-	gvk := result.GetObjectKind().GroupVersionKind()
-	steveType := fmt.Sprintf("%s.%s", gvk.Group, strings.ToLower(gvk.Kind))
-
-	apiObj, err := s.steve.SteveType(steveType).Create(t)
-	if err != nil {
-		return result, err
-	}
-
-	err = v1.ConvertToK8sType(apiObj.JSONResp, result)
-	if err != nil {
-		return result, err
-	}
-
-	return result, nil
-}
-
-func (s *SteveClient[T, TList]) Update(t T) (T, error) {
-	result := reflect.New(s.objType).Interface().(T)
-	result = s.gen(t.GetNamespace(), t.GetName(), result)
-
-	gvk := result.GetObjectKind().GroupVersionKind()
-	steveType := fmt.Sprintf("%s.%s", gvk.Group, strings.ToLower(gvk.Kind))
-
-	apiObj, err := s.steve.SteveType(steveType).ByID(t.GetNamespace() + "/" + t.GetName())
-	if err != nil {
-		return result, err
-	}
-
-	apiObj, err = s.steve.SteveType(steveType).Update(apiObj, t)
-	if err != nil {
-		return result, err
-	}
-
-	err = v1.ConvertToK8sType(apiObj.JSONResp, result)
-	if err != nil {
-		return result, err
-	}
-
-	return result, nil
-}
-
-func SteveClientFactory[T generic.RuntimeMetaObject, TList runtime.Object](steve *v1.Client, c generic.ClientInterface[T, TList], g GeneratorFunc[T], t T) *SteveClient[T, TList] {
-	return &SteveClient[T, TList]{
-		client:  c,
-		steve:   steve,
-		gen:     g,
-		objType: reflect.TypeOf(t).Elem(),
-	}
 }
