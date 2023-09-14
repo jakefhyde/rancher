@@ -8,26 +8,23 @@ import (
 	"text/template"
 
 	"github.com/Masterminds/sprig/v3"
-	"github.com/rancher/rancher/tests/framework/codegen/generator"
-	managementSchema "github.com/rancher/rancher/tests/framework/pkg/schemas/management.cattle.io/v3"
 	"github.com/rancher/wrangler/pkg/controller-gen/args"
 	"github.com/sirupsen/logrus"
 )
 
 func main() {
 	_ = os.Unsetenv("GOPATH")
-	generator.GenerateClient(managementSchema.Schemas, map[string]bool{
-		"userAttribute": true,
-	})
-
-	if err := replaceClientBasePackages(); err != nil {
-		panic(err)
-	}
+	//generator.GenerateClient(managementSchema.Schemas, map[string]bool{
+	//	"userAttribute": true,
+	//})
+	//
+	//if err := replaceClientBasePackages(); err != nil {
+	//	panic(err)
+	//}
 
 	if err := generateSteveClients(); err != nil {
 		panic(err)
 	}
-
 }
 
 type context struct {
@@ -41,6 +38,10 @@ type input struct {
 	source []any
 }
 
+// generateSteveClients is a generating function specifically designed to cobble together a wrangler-compliant version
+// of steve that utilizes steve for CRUD, and wrangler (aka k8s) for specific actions such as watch events. The entire
+// purpose of this generation is to cut down on lines of code to make equivalent steve calls, and was chosen as the
+// least intrusive option, as a means to avoid updating lasso or wrangler directly.
 func generateSteveClients() error {
 	rootDir := "../clients/steve/generated/"
 	err := os.MkdirAll(rootDir, 0755)

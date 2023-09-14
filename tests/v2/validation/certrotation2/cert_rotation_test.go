@@ -59,44 +59,13 @@ func (r *V2ProvCertRotationTestSuite) TestCertRotation() {
 		wranglerCtx, err := wrangler.NewContext(context.TODO(), *kubeConfig, r.client.RestConfig)
 		require.NoError(r.T(), err)
 
-		steveCtx, err := steve.NewContext(wranglerCtx, adminClient.Steve)
+		steveCtx, err := steve.NewContext(wranglerCtx, adminClient.Steve, r.client.Session)
 		require.NoError(r.T(), err)
 
 		require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
 		require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
 	})
 }
-
-func (r *V2ProvCertRotationTestSuite) a() {
-
-}
-
-//// Option a, has the neatest interface
-//func (r *V2ProvCertRotationTestSuite) a() {
-//	wranglerCtx, err := wrangler.NewContext(context.TODO(), *kubeConfig, r.client.RestConfig)
-//	require.NoError(r.T(), err)
-//
-//	steveCtx, err := steve.NewContext(adminClient.Steve, wranglerCtx)
-//	require.NoError(r.T(), err)
-//
-//	require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
-//	require.NoError(r.T(), RotateCerts(clusterName, steveCtx.Provisioning.Cluster(), steveCtx.RKE.RKEControlPlane()))
-//}
-//
-//// Option b, has the neatest interface
-//func (r *V2ProvCertRotationTestSuite) a() {
-//	wranglerCtx, err := wrangler.NewContext(context.TODO(), *kubeConfig, r.client.RestConfig)
-//	require.NoError(r.T(), err)
-//
-//	clusterClient := steve.ClientFactory[*provv1.Cluster, *provv1.ClusterList](adminClient.Steve, wranglerCtx.Provisioning.Cluster(), steve.NewGeneratorForType(provv1.NewCluster), &provv1.Cluster{})
-//	rkeClient := steve.ClientFactory[*rkev1.RKEControlPlane, *rkev1.RKEControlPlaneList](adminClient.Steve, wranglerCtx.RKE.RKEControlPlane(), steve.NewGeneratorForType(rkev1.NewRKEControlPlane), &rkev1.RKEControlPlane{})
-//
-//	steveCtx, err := steve.NewContext(adminClient.Steve, wranglerCtx)
-//	require.NoError(r.T(), err)
-//
-//	require.NoError(r.T(), RotateCerts(clusterName, steveCtx.ClusterClient, rkeClient))
-//	require.NoError(r.T(), RotateCerts(clusterName, clusterClient, rkeClient))
-//}
 
 func TestCertRotation(t *testing.T) {
 	suite.Run(t, new(V2ProvCertRotationTestSuite))

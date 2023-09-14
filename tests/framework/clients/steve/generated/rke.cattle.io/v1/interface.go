@@ -6,6 +6,7 @@ import (
 	v1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	controllers "github.com/rancher/rancher/pkg/generated/controllers/rke.cattle.io/v1"
 	stevev1 "github.com/rancher/rancher/tests/framework/clients/rancher/v1"
+	"github.com/rancher/rancher/tests/framework/pkg/session"
 	"github.com/rancher/rancher/tests/framework/pkg/steve/generic"
 	"github.com/rancher/wrangler/pkg/schemes"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -48,40 +49,42 @@ type Interface interface {
 	RKEControlPlane() RKEControlPlaneController
 }
 
-func New(controllerFactory controller.SharedControllerFactory, client *stevev1.Client) Interface {
+func New(controllerFactory controller.SharedControllerFactory, client *stevev1.Client, session *session.Session) Interface {
 	return &version{
 		controllerFactory: controllerFactory,
 		client:            client,
+		session:					 session,
 	}
 }
 
 type version struct {
 	controllerFactory controller.SharedControllerFactory
 	client            *stevev1.Client
+	session					 	*session.Session
 }
 
 
 func (v *version) CustomMachine() CustomMachineController {
-	return generic.NewController[*v1.CustomMachine, *v1.CustomMachineList](v.client, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "CustomMachine"}, "custommachines", true, v.controllerFactory)
+	return generic.NewController[*v1.CustomMachine, *v1.CustomMachineList](v.client, v.session, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "CustomMachine"}, "custommachines", true, v.controllerFactory)
 }
 
 func (v *version) ETCDSnapshot() ETCDSnapshotController {
-	return generic.NewController[*v1.ETCDSnapshot, *v1.ETCDSnapshotList](v.client, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "ETCDSnapshot"}, "etcdsnapshots", true, v.controllerFactory)
+	return generic.NewController[*v1.ETCDSnapshot, *v1.ETCDSnapshotList](v.client, v.session, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "ETCDSnapshot"}, "etcdsnapshots", true, v.controllerFactory)
 }
 
 func (v *version) RKEBootstrap() RKEBootstrapController {
-	return generic.NewController[*v1.RKEBootstrap, *v1.RKEBootstrapList](v.client, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKEBootstrap"}, "rkebootstraps", true, v.controllerFactory)
+	return generic.NewController[*v1.RKEBootstrap, *v1.RKEBootstrapList](v.client, v.session, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKEBootstrap"}, "rkebootstraps", true, v.controllerFactory)
 }
 
 func (v *version) RKEBootstrapTemplate() RKEBootstrapTemplateController {
-	return generic.NewController[*v1.RKEBootstrapTemplate, *v1.RKEBootstrapTemplateList](v.client, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKEBootstrapTemplate"}, "rkebootstraptemplates", true, v.controllerFactory)
+	return generic.NewController[*v1.RKEBootstrapTemplate, *v1.RKEBootstrapTemplateList](v.client, v.session, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKEBootstrapTemplate"}, "rkebootstraptemplates", true, v.controllerFactory)
 }
 
 func (v *version) RKECluster() RKEClusterController {
-	return generic.NewController[*v1.RKECluster, *v1.RKEClusterList](v.client, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKECluster"}, "rkeclusters", true, v.controllerFactory)
+	return generic.NewController[*v1.RKECluster, *v1.RKEClusterList](v.client, v.session, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKECluster"}, "rkeclusters", true, v.controllerFactory)
 }
 
 func (v *version) RKEControlPlane() RKEControlPlaneController {
-	return generic.NewController[*v1.RKEControlPlane, *v1.RKEControlPlaneList](v.client, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKEControlPlane"}, "rkecontrolplanes", true, v.controllerFactory)
+	return generic.NewController[*v1.RKEControlPlane, *v1.RKEControlPlaneList](v.client, v.session, schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "RKEControlPlane"}, "rkecontrolplanes", true, v.controllerFactory)
 }
 

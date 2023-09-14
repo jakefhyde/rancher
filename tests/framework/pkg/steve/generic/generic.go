@@ -9,6 +9,7 @@ import (
 
 	"github.com/rancher/lasso/pkg/controller"
 	v1 "github.com/rancher/rancher/tests/framework/clients/rancher/v1"
+	"github.com/rancher/rancher/tests/framework/pkg/session"
 	"github.com/rancher/wrangler/pkg/generic"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -18,6 +19,7 @@ import (
 
 type Controller[T generic.RuntimeMetaObject, TList runtime.Object] struct {
 	generic.ControllerInterface[T, TList]
+	Session       *session.Session
 	Steve         *v1.Client
 	gvk           schema.GroupVersionKind
 	groupResource schema.GroupResource
@@ -57,6 +59,7 @@ func ListOptionsToQuery(opts metav1.ListOptions) (url.Values, error) {
 	if opts.FieldSelector != "" {
 		//values["fieldSelector"] = opts.FieldSelector
 	}
+	panic("not implemented")
 
 	return values, nil
 }
@@ -84,7 +87,7 @@ func (s *Controller[T, TList]) List(namespace string, opts metav1.ListOptions) (
 		if err != nil {
 			return result, err
 		}
-		// todo
+		panic("not implemented")
 	}
 
 	return result, nil
@@ -104,6 +107,10 @@ func (s *Controller[T, TList]) Create(t T) (T, error) {
 	if err != nil {
 		return result, err
 	}
+
+	s.Session.RegisterCleanupFunc(func() error {
+		return s.Delete(result.GetNamespace(), result.GetName(), &metav1.DeleteOptions{})
+	})
 
 	return result, nil
 }
@@ -132,7 +139,7 @@ func (s *Controller[T, TList]) Update(t T) (T, error) {
 }
 
 // NewController creates a new controller for the given Object type and ObjectList type.
-func NewController[T generic.RuntimeMetaObject, TList runtime.Object](client *v1.Client, gvk schema.GroupVersionKind, resource string, namespaced bool, controller controller.SharedControllerFactory) *Controller[T, TList] {
+func NewController[T generic.RuntimeMetaObject, TList runtime.Object](client *v1.Client, session *session.Session, gvk schema.GroupVersionKind, resource string, namespaced bool, controller controller.SharedControllerFactory) *Controller[T, TList] {
 	var obj T
 	objPtrType := reflect.TypeOf(obj)
 	if objPtrType.Kind() != reflect.Pointer {
@@ -146,6 +153,7 @@ func NewController[T generic.RuntimeMetaObject, TList runtime.Object](client *v1
 	embedded := generic.NewController[T, TList](gvk, resource, namespaced, controller)
 	return &Controller[T, TList]{
 		ControllerInterface: embedded,
+		Session:             session,
 		Steve:               client,
 		gvk:                 gvk,
 		groupResource: schema.GroupResource{

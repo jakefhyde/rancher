@@ -8,6 +8,7 @@ import (
 	{{.PackageVersion}} "github.com/rancher/rancher/pkg/apis/{{.PackageSource}}/{{.PackageVersion}}"
 	controllers "github.com/rancher/rancher/pkg/generated/controllers/{{.PackageSource}}/{{.PackageVersion}}"
 	stevev1 "github.com/rancher/rancher/tests/framework/clients/rancher/v1"
+	"github.com/rancher/rancher/tests/framework/pkg/session"
 	"github.com/rancher/rancher/tests/framework/pkg/steve/generic"
 	"github.com/rancher/wrangler/pkg/schemes"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -25,21 +26,23 @@ type Interface interface { {{range $_, $name := .Names}}
 	{{$name}}() {{$name}}Controller{{end}}
 }
 
-func New(controllerFactory controller.SharedControllerFactory, client *stevev1.Client) Interface {
+func New(controllerFactory controller.SharedControllerFactory, client *stevev1.Client, session *session.Session) Interface {
 	return &version{
 		controllerFactory: controllerFactory,
 		client:            client,
+		session:					 session,
 	}
 }
 
 type version struct {
 	controllerFactory controller.SharedControllerFactory
 	client            *stevev1.Client
+	session					 	*session.Session
 }
 
 {{range $_, $name := .Names}}
 func (v *version) {{$name}}() {{$name}}Controller {
-	return generic.NewController[*v1.{{$name}}, *v1.{{$name}}List](v.client, schema.GroupVersionKind{Group: "{{$.PackageSource}}", Version: "{{$.PackageVersion}}", Kind: "{{$name}}"}, "{{$name | lower}}s", true, v.controllerFactory)
+	return generic.NewController[*v1.{{$name}}, *v1.{{$name}}List](v.client, v.session, schema.GroupVersionKind{Group: "{{$.PackageSource}}", Version: "{{$.PackageVersion}}", Kind: "{{$name}}"}, "{{$name | lower}}s", true, v.controllerFactory)
 }
 {{end}}
 `
