@@ -10,6 +10,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/rancher/norman/types/convert"
+	managementv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/channelserver"
 	v1 "github.com/rancher/rancher/pkg/generated/norman/core/v1"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
@@ -44,9 +45,8 @@ type MetadataURL struct {
 }
 
 const (
-	rkeMetadataConfig = "rke-metadata-config"
-	refreshInterval   = "refresh-interval-minutes"
-	fileLoc           = "data/data.json"
+	refreshInterval = "refresh-interval-minutes"
+	fileLoc         = "data/data.json"
 )
 
 var (
@@ -75,11 +75,11 @@ func Register(ctx context.Context, management *config.ManagementContext) {
 	}
 
 	mgmt.Settings("").AddHandler(ctx, "rke-metadata-handler", m.sync)
-	mgmt.Settings("").Controller().Enqueue("", rkeMetadataConfig)
+	mgmt.Settings("").Controller().Enqueue("", settings.RkeMetadataConfig.Name)
 }
 
-func (m *MetadataController) sync(key string, setting *v3.Setting) (runtime.Object, error) {
-	if setting == nil || (setting.Name != rkeMetadataConfig) {
+func (m *MetadataController) sync(_ string, setting *managementv3.Setting) (runtime.Object, error) {
+	if setting == nil || (setting.Name != settings.RkeMetadataConfig.Name) {
 		return nil, nil
 	}
 
