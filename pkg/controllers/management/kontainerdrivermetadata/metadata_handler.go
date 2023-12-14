@@ -2,14 +2,14 @@ package kontainerdrivermetadata
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/pkg/errors"
-	"github.com/rancher/norman/types/convert"
+	managementv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/channelserver"
 	v1 "github.com/rancher/rancher/pkg/generated/norman/core/v1"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
@@ -30,28 +30,15 @@ type MetadataController struct {
 	Addons               v3.RkeAddonInterface
 	SettingLister        v3.SettingLister
 	Settings             v3.SettingInterface
-	url                  *MetadataURL
+	url                  string
 }
-
-type MetadataURL struct {
-	//http path
-	path string
-}
-
-const (
-	rkeMetadataConfig = "rke-metadata-config"
-	refreshInterval   = "refresh-interval-minutes"
-	fileLoc           = "data/data.json"
-)
 
 var (
 	httpClient = &http.Client{
 		Timeout: time.Second * 30,
 	}
-	dataPath    = filepath.Join("./management-state", "driver-metadata", "rke")
-	prevHash    string
 	fileMapLock = sync.Mutex{}
-	fileMapData = map[string]bool{}
+	fileMapData = map[string]struct{}{}
 )
 
 func Register(ctx context.Context, management *config.ManagementContext) {
@@ -70,11 +57,11 @@ func Register(ctx context.Context, management *config.ManagementContext) {
 	}
 
 	mgmt.Settings("").AddHandler(ctx, "rke-metadata-handler", m.sync)
-	mgmt.Settings("").Controller().Enqueue("", rkeMetadataConfig)
+	mgmt.Settings("").Controller().Enqueue("", settings.RkeMetadataConfig.Name)
 }
 
-func (m *MetadataController) sync(key string, setting *v3.Setting) (runtime.Object, error) {
-	if setting == nil || (setting.Name != rkeMetadataConfig) {
+func (m *MetadataController) sync(_ string, setting *managementv3.Setting) (runtime.Object, error) {
+	if setting == nil || (setting.Name != settings.RkeMetadataConfig.Name) {
 		return nil, nil
 	}
 
@@ -86,21 +73,15 @@ func (m *MetadataController) sync(key string, setting *v3.Setting) (runtime.Obje
 	if value == "" {
 		value = setting.Default
 	}
-	settingValues, err := getSettingValues(value)
-	if err != nil {
-		return nil, fmt.Errorf("error getting setting values: %v", err)
-	}
 
-	metadata, err := parseURL(settingValues)
+	config, err := getMetadataConfig()
 	if err != nil {
 		return nil, err
 	}
-	m.url = metadata
 
-	interval, err := convert.ToNumber(settingValues[refreshInterval])
-	if err != nil {
-		return nil, fmt.Errorf("invalid number %v", interval)
-	}
+	m.url = config.URL
+
+	interval := config.RefreshIntervalMinutes
 
 	if interval > 0 {
 		logrus.Infof("Refreshing driverMetadata in %v minutes", interval)
@@ -125,23 +106,20 @@ func (m *MetadataController) refresh() error {
 	return nil
 }
 
-func (m *MetadataController) Refresh(url *MetadataURL) error {
+func (m *MetadataController) Refresh(url string) error {
 	data, err := loadData(url)
 	if err != nil {
-		return errors.Wrapf(err, "failed to refresh data from upstream %v", url.path)
+		return errors.Wrapf(err, "failed to refresh data from upstream %v", url)
 	}
-	logrus.Infof("driverMetadata: refreshing data from upstream %v", url.path)
+	logrus.Infof("driverMetadata: refreshing data from upstream %v", url)
 	return errors.Wrap(m.createOrUpdateMetadata(data), "failed to create or update driverMetadata")
 }
 
-func GetURLSettingValue() (*MetadataURL, error) {
-	settingValues, err := getSettingValues(settings.RkeMetadataConfig.Get())
+func getMetadataConfig() (settings.MetadataConfig, error) {
+	config := settings.MetadataConfig{}
+	err := json.Unmarshal([]byte(settings.RkeMetadataConfig.Get()), &config)
 	if err != nil {
-		return nil, err
+		return config, err
 	}
-	url, err := parseURL(settingValues)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing url %v %v", url, err)
-	}
-	return url, nil
+	return config, nil
 }
