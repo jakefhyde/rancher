@@ -36,11 +36,6 @@ type MetadataController struct {
 type MetadataURL struct {
 	//http path
 	path string
-	// branch set if .git path by user
-	branch string
-	// latestHash, isGit set in parseURL
-	latestHash string
-	isGit      bool
 }
 
 const (
@@ -118,10 +113,6 @@ func (m *MetadataController) sync(key string, setting *v3.Setting) (runtime.Obje
 }
 
 func (m *MetadataController) refresh() error {
-	if !toSync(m.url) {
-		logrus.Infof("driverMetadata: skip sync, hash up to date %v", m.url.latestHash)
-		return nil
-	}
 	if !storeMap(m.url) {
 		logrus.Infof("driverMetadata: already in progress")
 		return nil
@@ -131,7 +122,6 @@ func (m *MetadataController) refresh() error {
 		logrus.Warnf("%v, Fallback to refresh from local file path %v", err, DataJSONLocation)
 		return errors.Wrapf(m.createOrUpdateMetadataFromLocal(), "failed to refresh from local file path: %s", DataJSONLocation)
 	}
-	setFinalPath(m.url)
 	return nil
 }
 
