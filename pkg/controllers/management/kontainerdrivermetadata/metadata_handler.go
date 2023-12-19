@@ -98,9 +98,14 @@ func (m *MetadataController) sync(_ string, setting *managementv3.Setting) (runt
 
 	metadata, err := parseURL(settingValues)
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, ErrURLNotFound) {
+			return nil, err
+		} else {
+			logrus.Debugf("Cannot set metadata url: %v", err)
+		}
+	} else {
+		m.url = metadata
 	}
-	m.url = metadata
 
 	interval, err := convert.ToNumber(settingValues[refreshInterval])
 	if err != nil {
@@ -114,7 +119,10 @@ func (m *MetadataController) sync(_ string, setting *managementv3.Setting) (runt
 
 	// refresh to sync k3s/rke2 releases
 	channelserver.Refresh()
-	return setting, m.refresh()
+	if m.url != nil {
+		err = m.refresh()
+	}
+	return setting, err
 }
 
 func (m *MetadataController) refresh() error {
