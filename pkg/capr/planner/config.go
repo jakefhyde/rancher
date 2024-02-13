@@ -314,6 +314,8 @@ func addToken(config map[string]interface{}, entry *planEntry, tokensSecret plan
 }
 
 func addAddresses(secrets corecontrollers.SecretCache, config map[string]interface{}, entry *planEntry) error {
+	return nil
+
 	internalIPAddress := entry.Metadata.Annotations[capr.InternalAddressAnnotation]
 	ipAddress := entry.Metadata.Annotations[capr.AddressAnnotation]
 	internalAddressProvided, addressProvided := internalIPAddress != "", ipAddress != ""

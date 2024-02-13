@@ -399,6 +399,10 @@ func AssemblePrivateRegistryECRCredential(secretRef, objType, objName string, sp
 
 // AssembleRKEConfigSpec is a wrapper assembler for assembling configs on Clusters.
 func AssembleRKEConfigSpec(cluster *apimgmtv3.Cluster, spec apimgmtv3.ClusterSpec, secretLister v1.SecretLister) (apimgmtv3.ClusterSpec, error) {
+	// Although some call sites DeepCopy beforehand, if passing in the AppliedSpec or FailedSpec, values can be assembled
+	// onto pointer members which can cause unintended changes to be propagated into object caches and cause subsequent
+	// updates to expose sensitive data.
+	spec = *spec.DeepCopy()
 	spec, err := AssembleS3Credential(cluster.GetSecret("S3CredentialSecret"), ClusterType, cluster.Name, spec, secretLister)
 	if err != nil {
 		return spec, err

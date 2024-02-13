@@ -2,6 +2,7 @@ package v3
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/rancher/norman/controller"
@@ -247,11 +248,23 @@ func (s *clusterClient) GetNamespaced(namespace, name string, opts metav1.GetOpt
 }
 
 func (s *clusterClient) Update(o *v3.Cluster) (*v3.Cluster, error) {
+	if o.Status.AppliedSpec.RancherKubernetesEngineConfig != nil &&
+		o.Status.AppliedSpec.RancherKubernetesEngineConfig.Services.KubeAPI.SecretsEncryptionConfig != nil &&
+		o.Status.AppliedSpec.RancherKubernetesEngineConfig.Services.KubeAPI.SecretsEncryptionConfig.CustomConfig != nil &&
+		len(o.Status.AppliedSpec.RancherKubernetesEngineConfig.Services.KubeAPI.SecretsEncryptionConfig.CustomConfig.Resources) > 0 {
+		fmt.Printf("debug")
+	}
 	obj, err := s.objectClient.Update(o.Name, o)
 	return obj.(*v3.Cluster), err
 }
 
 func (s *clusterClient) UpdateStatus(o *v3.Cluster) (*v3.Cluster, error) {
+	if o.Status.AppliedSpec.RancherKubernetesEngineConfig != nil &&
+		o.Status.AppliedSpec.RancherKubernetesEngineConfig.Services.KubeAPI.SecretsEncryptionConfig != nil &&
+		o.Status.AppliedSpec.RancherKubernetesEngineConfig.Services.KubeAPI.SecretsEncryptionConfig.CustomConfig != nil &&
+		len(o.Status.AppliedSpec.RancherKubernetesEngineConfig.Services.KubeAPI.SecretsEncryptionConfig.CustomConfig.Resources) > 0 {
+		fmt.Printf("debug")
+	}
 	obj, err := s.objectClient.UpdateStatus(o.Name, o)
 	return obj.(*v3.Cluster), err
 }
