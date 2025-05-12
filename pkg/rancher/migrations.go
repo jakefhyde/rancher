@@ -668,9 +668,11 @@ func migrateHarvesterCloudCredentialExpiration(w *wrangler.Context) error {
 		return err
 	}
 
+	// log an error message and continue as this should not prevent Rancher from starting up if a failure is encountered (likely due to user-defined secrets)
+	success := true
+
 	for _, secret := range secrets.Items {
 		if kubeconfigYaml, ok := secret.Data["harvestercredentialConfig-kubeconfigContent"]; ok && kubeconfigYaml != nil {
-
 			expiration, err := cred.GetHarvesterCloudCredentialExpirationFromKubeconfig(string(kubeconfigYaml), func(tokenName string) (*v32.Token, error) {
 				return w.Mgmt.Token().Get(tokenName, metav1.GetOptions{})
 			})
@@ -680,7 +682,9 @@ func migrateHarvesterCloudCredentialExpiration(w *wrangler.Context) error {
 				// time.Unix returns an int64 and we don't want to produce overflow
 				expiration = strconv.FormatInt(time.Unix(0, 0).UnixMilli(), 10)
 			} else if err != nil {
-				return fmt.Errorf("failed to get harvester cloud credential expiration from kubeconfig: %w", err)
+				logrus.Errorf("failed to get harvester cloud credential expiration from kubeconfig for %s/%s: %v", secret.Namespace, secret.Name, err)
+				success = false
+				continue
 			}
 
 			if expiration != "" {
@@ -688,13 +692,14 @@ func migrateHarvesterCloudCredentialExpiration(w *wrangler.Context) error {
 				secret.Annotations[cred.CloudCredentialExpirationAnnotation] = expiration
 				_, err = w.Core.Secret().Update(&secret)
 				if err != nil {
-					return err
+					logrus.Errorf("failed to set harvester cloud credential expiration for secret %s/%s: %v", secret.Namespace, secret.Name, err)
+					success = false
 				}
 			}
 		}
 	}
 
-	cm.Data[harvesterCloudCredentialExpirationMigratedKey] = "true"
+	cm.Data[harvesterCloudCredentialExpirationMigratedKey] = strconv.FormatBool(success)
 	return createOrUpdateConfigMap(w.Core.ConfigMap(), cm)
 }
 
