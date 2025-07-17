@@ -9,6 +9,7 @@ func RequiredCRDs() []string {
 	requiredCRDS := BasicCRDs()
 	if features.ProvisioningV2.Enabled() {
 		requiredCRDS = append(requiredCRDS, ProvisioningV2CRDs()...)
+		requiredCRDS = append(requiredCRDS, ImportedCRDs()...)
 		if features.RKE2.Enabled() {
 			requiredCRDS = append(requiredCRDS, RKE2CRDs()...)
 		}
@@ -100,6 +101,14 @@ func RKE2CRDs() []string {
 		"rkebootstraptemplates.rke.cattle.io",
 		"rkeclusters.rke.cattle.io",
 		"rkecontrolplanes.rke.cattle.io",
+	}
+}
+
+func ImportedCRDs() []string {
+	return []string{
+		"importedcontrolplanes.rke.cattle.io",
+		"importedmachines.rke.cattle.io",
+		"importedclusters.rke.cattle.io",
 	}
 }
 
@@ -281,4 +290,8 @@ var MigratedResources = map[string]bool{
 	"users.management.cattle.io":                                      false,
 	"uiplugins.catalog.cattle.io":                                     true,
 	"workloads.project.cattle.io":                                     false,
+
+	"importedcontrolplanes.rke.cattle.io": false,
+	"importedmachines.rke.cattle.io":      false,
+	"importedclusters.rke.cattle.io":      false,
 }

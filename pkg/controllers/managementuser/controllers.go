@@ -7,6 +7,7 @@ import (
 	"github.com/k3s-io/api/pkg/generated/controllers/k3s.cattle.io"
 	apimgmtv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/controllers/managementlegacy/compose/common"
+	"github.com/rancher/rancher/pkg/controllers/managementuser/capibackpopulate"
 	"github.com/rancher/rancher/pkg/controllers/managementuser/cavalidator"
 	"github.com/rancher/rancher/pkg/controllers/managementuser/clusterauthtoken"
 	"github.com/rancher/rancher/pkg/controllers/managementuser/healthsyncer"
@@ -51,6 +52,8 @@ func Register(ctx context.Context, mgmt *config.ScaledContext, cluster *config.U
 				cluster.Catalog.V1().App(),
 				cluster.Plan.V1().Plan(),
 				cluster.Management.Wrangler.RKE.RKEControlPlane())
+		} else {
+			capibackpopulate.Register(ctx, cluster)
 		}
 
 		machinerole.Register(ctx, cluster)

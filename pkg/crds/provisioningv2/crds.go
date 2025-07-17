@@ -30,6 +30,7 @@ var (
 
 func List() (result []crd.CRD) {
 	result = append(result, provisioning()...)
+	result = append(result, imported()...)
 	if features.RKE2.Enabled() {
 		result = append(result, rke2()...)
 	}
@@ -60,6 +61,29 @@ func clusterIndexed(c crd.CRD) crd.CRD {
 	newLabels["auth.cattle.io/cluster-indexed"] = "true"
 	c.Labels = newLabels
 	return c
+}
+
+func imported() []crd.CRD {
+	return []crd.CRD{
+		newRKECRD(&rkev1.ImportedCluster{}, func(c crd.CRD) crd.CRD {
+			c.Labels = map[string]string{
+				"cluster.x-k8s.io/v1beta1": "v1",
+			}
+			return clusterIndexed(c)
+		}),
+		newRKECRD(&rkev1.ImportedMachine{}, func(c crd.CRD) crd.CRD {
+			c.Labels = map[string]string{
+				"cluster.x-k8s.io/v1beta1": "v1",
+			}
+			return clusterIndexed(c)
+		}),
+		newRKECRD(&rkev1.ImportedControlPlane{}, func(c crd.CRD) crd.CRD {
+			c.Labels = map[string]string{
+				"cluster.x-k8s.io/v1beta1": "v1",
+			}
+			return clusterIndexed(c)
+		}),
+	}
 }
 
 func rke2() []crd.CRD {

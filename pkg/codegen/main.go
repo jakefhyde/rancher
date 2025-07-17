@@ -109,6 +109,7 @@ func main() {
 					capi.MachineDeployment{},
 					capi.MachineHealthCheck{},
 					capi.Cluster{},
+					"./pkg/apis/cluster.x-k8s.io/v1beta1",
 				},
 			},
 			"scc.cattle.io": {
