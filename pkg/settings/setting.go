@@ -389,6 +389,9 @@ func PrefixPrivateRegistry(image string) string {
 
 // IsRelease returns true if the running server is a released version of rancher.
 func IsRelease() bool {
+	if os.Getenv("CATTLE_DEV_MODE") != "" {
+		return false
+	}
 	return !strings.Contains(ServerVersion.Get(), "head") && releasePattern.MatchString(ServerVersion.Get())
 }
 

@@ -3,6 +3,7 @@ package rancher
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 
@@ -116,7 +117,7 @@ func getConfigMap(configMapController controllerv1.ConfigMapController, configMa
 	}
 
 	// we do not migrate in development environments
-	if rancherversion.Version == "dev" {
+	if rancherversion.Version == "dev" || os.Getenv("CATTLE_DEV_MODE") != "" {
 		return nil, nil
 	}
 

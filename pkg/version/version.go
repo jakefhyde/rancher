@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+
+	"github.com/rancher/rancher/pkg/settings"
 )
 
 var (
@@ -39,7 +41,9 @@ func NewVersionHandler() http.Handler {
 	if versionType, ok := os.LookupEnv(primeEnv); ok && versionType == "prime" {
 		rancherPrime = "true"
 	}
-	return &versionHandler{info: Info{Version, GitCommit, rancherPrime}}
+	// TODO(jhyde): remove
+	version := settings.ServerVersion.Get()
+	return &versionHandler{info: Info{version, GitCommit, rancherPrime}}
 }
 
 // ServeHTTP handles GET requests for version information.
