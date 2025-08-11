@@ -17,6 +17,7 @@ import (
 	"github.com/rancher/rancher/pkg/capr/planner"
 	"github.com/rancher/rancher/pkg/controllers/capr/machineprovision"
 	mgmtcontroller "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/wrangler/v3/pkg/apply"
 	"github.com/rancher/wrangler/v3/pkg/data"
 	"github.com/rancher/wrangler/v3/pkg/data/convert"
@@ -46,7 +47,7 @@ func getInfraRef(rkeCluster *rkev1.RKECluster) *corev1.ObjectReference {
 
 // objects generates the corresponding rkecontrolplanes.rke.cattle.io, clusters.cluster.x-k8s.io, and
 // machinedeployments.cluster.x-k8s.io objects based on the passed in clusters.provisioning.cattle.io object
-func objects(cluster *rancherv1.Cluster, dynamic *dynamic.Controller, dynamicSchema mgmtcontroller.DynamicSchemaCache, secrets v1.SecretCache) (result []runtime.Object, _ error) {
+func objects(cluster *rancherv1.Cluster, mgmtCluster *v3.Cluster, dynamic *dynamic.Controller, dynamicSchema mgmtcontroller.DynamicSchemaCache, secrets v1.SecretCache) (result []runtime.Object, _ error) {
 	if !cluster.DeletionTimestamp.IsZero() {
 		return nil, nil
 	}
@@ -64,7 +65,7 @@ func objects(cluster *rancherv1.Cluster, dynamic *dynamic.Controller, dynamicSch
 	}
 	result = append(result, rkeControlPlane)
 
-	capiCluster := capiCluster(cluster, rkeControlPlane, infraRef)
+	capiCluster := capiCluster(cluster, mgmtCluster, rkeControlPlane, infraRef)
 	result = append(result, capiCluster)
 
 	machineDeployments, err := machineDeployments(cluster, capiCluster, dynamic, dynamicSchema, secrets)
@@ -559,7 +560,7 @@ func rkeControlPlane(cluster *rancherv1.Cluster) (*rkev1.RKEControlPlane, error)
 	}, nil
 }
 
-func capiCluster(cluster *rancherv1.Cluster, rkeControlPlane *rkev1.RKEControlPlane, infraRef *corev1.ObjectReference) *capi.Cluster {
+func capiCluster(cluster *rancherv1.Cluster, mgmtCluster *v3.Cluster, rkeControlPlane *rkev1.RKEControlPlane, infraRef *corev1.ObjectReference) *capi.Cluster {
 	gvk, err := gvk.Get(rkeControlPlane)
 	if err != nil {
 		// this is a build issue if it happens
@@ -570,7 +571,7 @@ func capiCluster(cluster *rancherv1.Cluster, rkeControlPlane *rkev1.RKEControlPl
 
 	ownerGVK := rancherv1.SchemeGroupVersion.WithKind("Cluster")
 	ownerAPIVersion, _ := ownerGVK.ToAPIVersionAndKind()
-	return &capi.Cluster{
+	cc := &capi.Cluster{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      cluster.Name,
 			Namespace: cluster.Namespace,
@@ -595,4 +596,11 @@ func capiCluster(cluster *rancherv1.Cluster, rkeControlPlane *rkev1.RKEControlPl
 			},
 		},
 	}
+	if infraRef.APIVersion != "" && infraRef.APIVersion != capr.DefaultMachineConfigAPIVersion {
+		cc.Spec.ControlPlaneEndpoint = capi.APIEndpoint{
+			Host: settings.InternalServerURL.Get() + "/k8s/clusters/" + mgmtCluster.Name,
+			Port: 443,
+		}
+	}
+	return cc
 }

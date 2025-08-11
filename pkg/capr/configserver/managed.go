@@ -20,7 +20,7 @@ func (r *RKE2ConfigServer) findMachineByProvisioningSA(req *http.Request) (strin
 		return "", "", err
 	}
 
-	if sa.Labels[capr.RoleLabel] != capr.RoleBootstrap || string(sa.UID) != secrets[0].Annotations[api.ServiceAccountUIDKey] {
+	if sa.Labels[capr.ServiceAccountRoleLabel] != capr.RoleBootstrap || string(sa.UID) != secrets[0].Annotations[api.ServiceAccountUIDKey] {
 		return "", "", err
 	}
 

@@ -1,12 +1,15 @@
 package bootstrap
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
+	"text/template"
 	"time"
 
 	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
@@ -39,9 +42,55 @@ import (
 )
 
 const (
-	rkeBootstrapName                       = "rke.cattle.io/rkebootstrap-name"
+	rkeBootstrapNameLabel                  = "rke.cattle.io/rkebootstrap-name"
 	capiMachinePreTerminateAnnotation      = "pre-terminate.delete.hook.machine.cluster.x-k8s.io/rke-bootstrap-cleanup"
 	capiMachinePreTerminateAnnotationOwner = "rke-bootstrap-controller"
+
+	enqueueDuration = 10 * time.Second
+)
+
+const (
+	cloudConfigHeader = `#cloud-config
+`
+
+	filesTemplate = `{{ define "files" -}}
+write_files:{{ range . }}
+-   path: {{.Path}}
+    {{ if ne .Encoding "" -}}
+    encoding: "{{.Encoding}}"
+    {{ end -}}
+    {{ if ne .Owner "" -}}
+    owner: {{.Owner}}
+    {{ end -}}
+    {{ if ne .Permissions "" -}}
+    permissions: '{{.Permissions}}'
+    {{ end -}}
+    content: |
+{{.Content | Indent 6}}
+{{- end -}}
+{{- end -}}
+`
+
+	commandsTemplate = `{{- define "commands" -}}
+{{ range . }}
+  - {{printf "%q" .}}
+{{- end -}}
+{{- end -}}
+`
+
+	arbitraryTemplate = `{{- define "arbitrary" -}}{{- range $key, $value := . }}
+{{ $key -}}: {{ $value -}}
+{{- end -}}
+{{- end -}}
+`
+
+	genericCloudInit = `{{.Header}}
+{{template "files" .WriteFiles}}
+{{template "arbitrary" .AdditionalArbitraryData}}
+runcmd:
+{{- template "commands" .Commands }}
+{{ .AdditionalCloudInit -}}
+`
 )
 
 type handler struct {
@@ -91,7 +140,7 @@ func Register(ctx context.Context, clients *wrangler.Context) {
 
 	relatedresource.Watch(ctx, "rke-bootstrap-trigger", func(namespace, name string, obj runtime.Object) ([]relatedresource.Key, error) {
 		if sa, ok := obj.(*corev1.ServiceAccount); ok {
-			if name, ok := sa.Labels[rkeBootstrapName]; ok {
+			if name, ok := sa.Labels[rkeBootstrapNameLabel]; ok {
 				return []relatedresource.Key{
 					{
 						Namespace: sa.Namespace,
@@ -112,32 +161,119 @@ func Register(ctx context.Context, clients *wrangler.Context) {
 	}, clients.RKE.RKEBootstrap(), clients.Core.ServiceAccount(), clients.CAPI.Machine())
 }
 
-func (h *handler) getBootstrapSecret(namespace, name string, envVars []corev1.EnvVar, machine *capi.Machine, dataDir string) (*corev1.Secret, error) {
-	sa, err := h.serviceAccountCache.Get(namespace, name)
+type Scope struct {
+	Bootstrap    *rkev1.RKEBootstrap
+	Machine      *capi.Machine
+	Cluster      *capi.Cluster
+	ControlPlane *rkev1.RKEControlPlane
+}
+
+func (h *handler) NewScope(bootstrap *rkev1.RKEBootstrap) (*Scope, error) {
+	machine, err := capr.GetOwnerCAPIMachine(bootstrap, h.machineCache)
 	if apierrors.IsNotFound(err) {
-		return nil, nil
+		logrus.Debugf("[rkebootstrap] %s/%s: waiting: machine to be set as owner reference", bootstrap.Namespace, bootstrap.Name)
+		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, enqueueDuration)
+		return nil, generic.ErrSkip
+	}
+	if err != nil {
+		logrus.Errorf("[rkebootstrap] %s/%s: error getting machine by owner reference %v", bootstrap.Namespace, bootstrap.Name, err)
+		return nil, err
 	}
 
+	cluster, err := h.capiClusterCache.Get(machine.Namespace, machine.Spec.ClusterName)
+	if apierrors.IsNotFound(err) {
+		logrus.Debugf("[rkebootstrap] %s/%s: waiting: CAPI cluster does not exist", bootstrap.Namespace, bootstrap.Name)
+		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, enqueueDuration)
+		return nil, generic.ErrSkip
+	}
+	if err != nil {
+		logrus.Errorf("[rkebootstrap] %s/%s: error getting CAPI cluster %v", bootstrap.Namespace, bootstrap.Name, err)
+		return nil, err
+	}
+
+	if cluster.Spec.ControlPlaneRef == nil {
+		logrus.Debugf("[rkebootstrap] %s/%s: waiting: CAPI cluster does not have controlplane reference", bootstrap.Namespace, bootstrap.Name)
+		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, enqueueDuration)
+		return nil, generic.ErrSkip
+	}
+
+	controlPlane, err := h.rkeControlPlanes.Get(cluster.Spec.ControlPlaneRef.Namespace, cluster.Spec.ControlPlaneRef.Name)
+	if err != nil {
+		logrus.Errorf("[rkebootstrap] %s/%s: error getting RKEControlPlane %v", bootstrap.Namespace, bootstrap.Name, err)
+		return nil, err
+	}
+
+	return &Scope{
+		Bootstrap:    bootstrap,
+		Machine:      machine,
+		ControlPlane: controlPlane,
+		Cluster:      cluster,
+	}, nil
+}
+
+func (h *handler) getBootstrapSecret(namespace, name string, scope *Scope) (*corev1.Secret, error) {
+	serviceAccount, err := h.serviceAccountCache.Get(namespace, name)
+	// service account will not exist on first iteration
+	if apierrors.IsNotFound(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	tokenSecret, err := serviceaccounttoken.EnsureSecretForServiceAccount(context.Background(), h.secretCache, h.k8s, serviceAccount)
 	if err != nil {
 		return nil, err
 	}
-	secret, err := serviceaccounttoken.EnsureSecretForServiceAccount(context.Background(), h.secretCache, h.k8s, sa)
-	if err != nil {
-		return nil, err
-	}
-	hash := sha256.Sum256(secret.Data["token"])
+
+	hash := sha256.Sum256(tokenSecret.Data["token"])
 
 	hasHostPort, err := h.rancherDeploymentHasHostPort()
 	if err != nil {
 		return nil, err
 	}
 
-	is := installer.LinuxInstallScript
-	if os := machine.GetLabels()[capr.CattleOSLabel]; os == capr.WindowsMachineOS {
-		is = installer.WindowsInstallScript
+	installScriptFunc := installer.LinuxInstallScript
+	if scope.Machine.GetLabels()[capr.CattleOSLabel] == capr.WindowsMachineOS {
+		installScriptFunc = installer.WindowsInstallScript
 	}
 
-	data, err := is(context.WithValue(context.Background(), tls.InternalAPI, hasHostPort), base64.URLEncoding.EncodeToString(hash[:]), envVars, "", dataDir)
+	envVars, err := h.getEnvVars(scope.ControlPlane)
+	if err != nil {
+		return nil, err
+	}
+
+	installScript, err := installScriptFunc(context.WithValue(context.Background(), tls.InternalAPI, hasHostPort), base64.URLEncoding.EncodeToString(hash[:]), envVars, "", capr.GetDistroDataDir(scope.ControlPlane))
+	if err != nil {
+		return nil, err
+	}
+
+	var output bytes.Buffer
+
+	gz := gzip.NewWriter(&output)
+	if _, err = gz.Write(installScript); err != nil {
+		return nil, err
+	}
+	if err = gz.Close(); err != nil {
+		return nil, err
+	}
+
+	content := base64.StdEncoding.EncodeToString(output.Bytes())
+
+	input := UserData{}
+	input.Header = cloudConfigHeader
+	input.WriteFiles = []UserDataFile{
+		{
+			Content:     content,
+			Path:        "/usr/local/custom_script/install.sh",
+			Encoding:    "gzip+b64",
+			Permissions: "0644",
+		},
+	}
+	input.Commands = []string{"sh /usr/local/custom_script/install.sh"}
+	input.AdditionalCloudInit = scope.ControlPlane.Spec.AdditionalUserData.Config
+	input.AdditionalArbitraryData = scope.ControlPlane.Spec.AdditionalUserData.Data
+
+	userData, err := generate(genericCloudInit, input)
 	if err != nil {
 		return nil, err
 	}
@@ -148,32 +284,92 @@ func (h *handler) getBootstrapSecret(namespace, name string, envVars []corev1.En
 			Namespace: namespace,
 		},
 		Data: map[string][]byte{
-			"value": data,
+			"value": userData,
+			//"format": []byte{},
 		},
 		Type: "rke.cattle.io/bootstrap",
 	}, nil
 }
 
-func (h *handler) assignPlanSecret(machine *capi.Machine, bootstrap *rkev1.RKEBootstrap) []runtime.Object {
-	planSecretName := capr.PlanSecretFromBootstrapName(bootstrap.Name)
-	labels, annotations := getLabelsAndAnnotationsForPlanSecret(bootstrap, machine)
+type UserDataFile struct {
+	Path string `json:"path"`
 
-	sa := &corev1.ServiceAccount{
+	// Owner specifies the ownership of the file, e.g. "root:root".
+	//+optional
+	Owner string `json:"owner,omitempty"`
+
+	// Permissions specifies the permissions to assign to the file, e.g. "0640".
+	//+optional
+	Permissions string `json:"permissions,omitempty"`
+
+	// Encoding specifies the encoding of the file contents.
+	// +kubebuilder:validation:Enum=base64;gzip;gzip+base64
+	//+optional
+	Encoding string `json:"encoding,omitempty"`
+
+	Content string `json:"content,omitempty"`
+}
+
+type UserData struct {
+	Header                  string
+	WriteFiles              []UserDataFile
+	Commands                []string
+	AdditionalCloudInit     string
+	AdditionalArbitraryData map[string]string
+}
+
+func generate(tpl string, data interface{}) ([]byte, error) {
+	tm := template.New("template").Funcs(map[string]any{
+		"Indent": func(i int, input string) string {
+			split := strings.Split(input, "\n")
+			ident := "\n" + strings.Repeat(" ", i)
+
+			return strings.Repeat(" ", i) + strings.Join(split, ident)
+		},
+	})
+	if _, err := tm.Parse(filesTemplate); err != nil {
+		return nil, err
+	}
+	if _, err := tm.Parse(commandsTemplate); err != nil {
+		return nil, err
+	}
+	if _, err := tm.Parse(arbitraryTemplate); err != nil {
+		return nil, err
+	}
+
+	t, err := tm.Parse(tpl)
+	if err != nil {
+		return nil, err
+	}
+
+	var out bytes.Buffer
+	if err := t.Execute(&out, data); err != nil {
+		return nil, err
+	}
+
+	return out.Bytes(), nil
+}
+
+func (h *handler) assignPlanSecret(scope *Scope) []runtime.Object {
+	planSecretName := capr.PlanSecretFromBootstrapName(scope.Bootstrap.Name)
+	labels, annotations := getLabelsAndAnnotationsForPlanSecret(scope.Bootstrap, scope.Machine)
+
+	serviceAccount := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planSecretName,
-			Namespace: bootstrap.Namespace,
+			Namespace: scope.Bootstrap.Namespace,
 			Labels: map[string]string{
-				capr.MachineNameLabel: machine.Name,
-				rkeBootstrapName:      bootstrap.Name,
-				capr.RoleLabel:        capr.RolePlan,
-				capr.PlanSecret:       planSecretName,
+				capr.MachineNameLabel:        scope.Machine.Name,
+				rkeBootstrapNameLabel:        scope.Bootstrap.Name,
+				capr.ServiceAccountRoleLabel: capr.RolePlan,
+				capr.PlanSecret:              planSecretName,
 			},
 		},
 	}
-	secret := &corev1.Secret{
+	planSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        planSecretName,
-			Namespace:   bootstrap.Namespace,
+			Namespace:   scope.Bootstrap.Namespace,
 			Labels:      labels,
 			Annotations: annotations,
 		},
@@ -182,7 +378,7 @@ func (h *handler) assignPlanSecret(machine *capi.Machine, bootstrap *rkev1.RKEBo
 	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planSecretName,
-			Namespace: bootstrap.Namespace,
+			Namespace: scope.Bootstrap.Namespace,
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -196,13 +392,13 @@ func (h *handler) assignPlanSecret(machine *capi.Machine, bootstrap *rkev1.RKEBo
 	roleBinding := &rbacv1.RoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planSecretName,
-			Namespace: bootstrap.Namespace,
+			Namespace: scope.Bootstrap.Namespace,
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      sa.Name,
-				Namespace: sa.Namespace,
+				Name:      serviceAccount.Name,
+				Namespace: serviceAccount.Namespace,
 			},
 		},
 		RoleRef: rbacv1.RoleRef{
@@ -212,7 +408,7 @@ func (h *handler) assignPlanSecret(machine *capi.Machine, bootstrap *rkev1.RKEBo
 		},
 	}
 
-	return []runtime.Object{sa, secret, role, roleBinding}
+	return []runtime.Object{serviceAccount, planSecret, role, roleBinding}
 }
 
 func (h *handler) getEnvVars(controlPlane *rkev1.RKEControlPlane) ([]corev1.EnvVar, error) {
@@ -244,50 +440,39 @@ func shouldCreateBootstrapSecret(phase capi.MachinePhase) bool {
 	return phase != capi.MachinePhaseDeleting && phase != capi.MachinePhaseDeleted && phase != capi.MachinePhaseFailed
 }
 
-// assignBootStrapSecret is utilized by the bootstrap controller's GeneratingHandler method to designate the lifecycle
+// assignBootstrapSecret is utilized by the bootstrap controller's GeneratingHandler method to designate the lifecycle
 // of both the bootstrap secret and related service account. The bootstrap secret and service account must be valid
 // until the corresponding CAPI Machine object's Machine Phase is at least "Running", which indicates that the machine
 // "has become a Kubernetes Node in a Ready state".
-func (h *handler) assignBootStrapSecret(machine *capi.Machine, bootstrap *rkev1.RKEBootstrap, capiCluster *capi.Cluster) (*corev1.Secret, []runtime.Object, error) {
-	if !shouldCreateBootstrapSecret(capi.MachinePhase(machine.Status.Phase)) {
+func (h *handler) assignBootstrapSecret(scope *Scope) (*corev1.Secret, []runtime.Object, error) {
+	if !shouldCreateBootstrapSecret(capi.MachinePhase(scope.Machine.Status.Phase)) {
 		return nil, nil, nil
 	}
 
-	if capiCluster.Spec.ControlPlaneRef == nil || capiCluster.Spec.ControlPlaneRef.Kind != "RKEControlPlane" {
+	if scope.Cluster.Spec.ControlPlaneRef == nil || scope.Cluster.Spec.ControlPlaneRef.Kind != "RKEControlPlane" {
 		return nil, nil, nil
 	}
-	controlPlane, err := h.rkeControlPlanes.Get(bootstrap.Namespace, capiCluster.Spec.ControlPlaneRef.Name)
-	if err != nil {
-		return nil, nil, err
-	}
 
-	envVars, err := h.getEnvVars(controlPlane)
-	if err != nil {
-		return nil, nil, err
-	}
+	serviceAccountName := name.SafeConcatName(scope.Bootstrap.Name, "machine", "bootstrap")
 
-	dataDir := capr.GetDistroDataDir(controlPlane)
-
-	secretName := name.SafeConcatName(bootstrap.Name, "machine", "bootstrap")
-
-	sa := &corev1.ServiceAccount{
+	serviceAccount := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      secretName,
-			Namespace: bootstrap.Namespace,
+			Name:      serviceAccountName,
+			Namespace: scope.Bootstrap.Namespace,
 			Labels: map[string]string{
-				capr.MachineNameLabel: machine.Name,
-				rkeBootstrapName:      bootstrap.Name,
-				capr.RoleLabel:        capr.RoleBootstrap,
+				capr.MachineNameLabel:        scope.Machine.Name,
+				rkeBootstrapNameLabel:        scope.Bootstrap.Name,
+				capr.ServiceAccountRoleLabel: capr.RoleBootstrap,
 			},
 		},
 	}
 
-	bootstrapSecret, err := h.getBootstrapSecret(sa.Namespace, sa.Name, envVars, machine, dataDir)
+	bootstrapSecret, err := h.getBootstrapSecret(serviceAccount.Namespace, serviceAccount.Name, scope)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return bootstrapSecret, []runtime.Object{sa}, nil
+	return bootstrapSecret, []runtime.Object{serviceAccount}, nil
 }
 
 func (h *handler) OnChange(_ string, bootstrap *rkev1.RKEBootstrap) (*rkev1.RKEBootstrap, error) {
@@ -312,45 +497,28 @@ func (h *handler) GeneratingHandler(bootstrap *rkev1.RKEBootstrap, status rkev1.
 		result []runtime.Object
 	)
 
-	machine, err := capr.GetOwnerCAPIMachine(bootstrap, h.machineCache)
-	if apierrors.IsNotFound(err) {
-		logrus.Debugf("[rkebootstrap] %s/%s: waiting: machine to be set as owner reference", bootstrap.Namespace, bootstrap.Name)
-		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, 10*time.Second)
-		return result, status, generic.ErrSkip
-	}
+	scope, err := h.NewScope(bootstrap)
 	if err != nil {
-		logrus.Errorf("[rkebootstrap] %s/%s: error getting machine by owner reference %v", bootstrap.Namespace, bootstrap.Name, err)
 		return nil, status, err
 	}
 
-	capiCluster, err := h.capiClusterCache.Get(machine.Namespace, machine.Spec.ClusterName)
-	if apierrors.IsNotFound(err) {
-		logrus.Debugf("[rkebootstrap] %s/%s: waiting: CAPI cluster does not exist", bootstrap.Namespace, bootstrap.Name)
-		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, 10*time.Second)
-		return result, status, generic.ErrSkip
-	}
-	if err != nil {
-		logrus.Errorf("[rkebootstrap] %s/%s: error getting CAPI cluster %v", bootstrap.Namespace, bootstrap.Name, err)
-		return result, status, err
-	}
-
-	if capiannotations.IsPaused(capiCluster, bootstrap) {
+	if capiannotations.IsPaused(scope.Cluster, bootstrap) {
 		logrus.Debugf("[rkebootstrap] %s/%s: waiting: CAPI cluster or RKEBootstrap is paused", bootstrap.Namespace, bootstrap.Name)
-		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, 10*time.Second)
+		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, enqueueDuration)
 		return result, status, generic.ErrSkip
 	}
 
-	if !capiCluster.Status.InfrastructureReady {
+	if !scope.Cluster.Status.InfrastructureReady {
 		logrus.Debugf("[rkebootstrap] %s/%s: waiting: CAPI cluster infrastructure is not ready", bootstrap.Namespace, bootstrap.Name)
-		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, 10*time.Second)
+		h.rkeBootstrap.EnqueueAfter(bootstrap.Namespace, bootstrap.Name, enqueueDuration)
 		return result, status, generic.ErrSkip
 	}
 
 	// The plan secret is used by the planner to deliver plans to the system-agent (and receive feedback)
-	result = append(result, h.assignPlanSecret(machine, bootstrap)...)
+	result = append(result, h.assignPlanSecret(scope)...)
 
 	// The bootstrap secret contains the system-agent install script with corresponding information to bootstrap the node
-	bootstrapSecret, objs, err := h.assignBootStrapSecret(machine, bootstrap, capiCluster)
+	bootstrapSecret, objs, err := h.assignBootstrapSecret(scope)
 	if err != nil {
 		return nil, status, err
 	}

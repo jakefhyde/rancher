@@ -5,6 +5,7 @@ import (
 )
 
 type ClusterConfiguration struct {
+	AdditionalUserData AdditionalUserData `json:"additionalUserData,omitempty"`
 	// UpgradeStrategy contains the concurrency and drain configuration to be
 	// used when upgrading machine pools of servers and agents.
 	// +optional
@@ -76,6 +77,20 @@ type ClusterConfiguration struct {
 	// cluster, regardless of whether a reconciliation is required.
 	// +optional
 	ProvisionGeneration int `json:"provisionGeneration,omitempty"`
+}
+
+// AdditionalUserData is a field that allows users to specify additional cloud-init configuration.
+// +kubebuilder:validation:XValidation:rule="!has(self.data) || !has(self.config)", message="Only config or data could be populated at once"
+type AdditionalUserData struct {
+	// In case of using ignition, the data format is documented here: https://kinvolk.io/docs/flatcar-container-linux/latest/provisioning/cl-config/
+	// NOTE: All fields of the UserData that are managed by the RKEBootstrap controller will be ignored, this include "write_files", "runcmd", "ntp".
+	// +optional
+	Config string `json:"config,omitempty"`
+
+	// Data allows passing an arbitrary set of key/value pairs consistent with
+	// https://cloudinit.readthedocs.io/en/latest/reference/modules.html
+	// to extend existing cloud-init configuration
+	Data map[string]string `json:"data,omitempty"`
 }
 
 type ClusterUpgradeStrategy struct {

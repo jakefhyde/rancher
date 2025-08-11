@@ -40,3 +40,5 @@ data.json
 informer_object_cache.db
 informer_object_cache.db-shm
 informer_object_cache.db-wal
+
+.dev

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/capr"
 	"github.com/rancher/rancher/pkg/namespace"
 	"github.com/rancher/rancher/pkg/settings"
@@ -84,7 +85,10 @@ func Test_getBootstrapSecret(t *testing.T) {
 			a.Nil(err)
 			machine, err := handler.machineCache.Get(tt.args.namespaceName, tt.args.os)
 			a.Nil(err)
-			secret, err := handler.getBootstrapSecret(tt.args.namespaceName, tt.args.secretName, []v1.EnvVar{}, machine, "")
+			secret, err := handler.getBootstrapSecret(tt.args.namespaceName, tt.args.secretName, &Scope{
+				Machine:      machine,
+				ControlPlane: &rkev1.RKEControlPlane{},
+			})
 			a.Nil(err)
 
 			// assert

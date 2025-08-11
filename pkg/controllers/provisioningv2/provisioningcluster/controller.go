@@ -365,7 +365,7 @@ func (h *handler) OnRancherClusterChange(obj *rancherv1.Cluster, status rancherv
 		}
 	}
 
-	objs, err := objects(obj, h.dynamic, h.dynamicSchema, h.secretCache)
+	objs, err := objects(obj, mgmtCluster, h.dynamic, h.dynamicSchema, h.secretCache)
 	return objs, status, err
 }
 

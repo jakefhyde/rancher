@@ -72,7 +72,7 @@ const (
 	PlanSecret                                 = "rke.cattle.io/plan-secret-name"
 	PostDrainAnnotation                        = "rke.cattle.io/post-drain"
 	PreDrainAnnotation                         = "rke.cattle.io/pre-drain"
-	RoleLabel                                  = "rke.cattle.io/service-account-role"
+	ServiceAccountRoleLabel                    = "rke.cattle.io/service-account-role"
 	TaintsAnnotation                           = "rke.cattle.io/taints"
 	UnCordonAnnotation                         = "rke.cattle.io/uncordon"
 	WorkerRoleLabel                            = "rke.cattle.io/worker-role"
@@ -299,7 +299,7 @@ func PlanSACheck(bootstrapCache rkecontroller.RKEBootstrapCache, machineName str
 		return fmt.Errorf("planSA %s/%s compared machine name was blank", planSA.Namespace, planSA.Name)
 	}
 	if planSA.Labels[MachineNameLabel] != machineName ||
-		planSA.Labels[RoleLabel] != RolePlan ||
+		planSA.Labels[ServiceAccountRoleLabel] != RolePlan ||
 		planSA.Labels[PlanSecret] == "" {
 		return fmt.Errorf("planSA %s/%s does not have correct labels", planSA.Namespace, planSA.Name)
 	}

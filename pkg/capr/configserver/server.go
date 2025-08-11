@@ -340,8 +340,8 @@ func (r *RKE2ConfigServer) findSA(req *http.Request) (string, *corev1.Secret, er
 	}
 
 	planSAs, err := r.serviceAccountsCache.List(machineNamespace, labels.SelectorFromSet(map[string]string{
-		capr.MachineNameLabel: machineName,
-		capr.RoleLabel:        capr.RolePlan,
+		capr.MachineNameLabel:        machineName,
+		capr.ServiceAccountRoleLabel: capr.RolePlan,
 	}))
 	if err != nil {
 		return "", nil, err
@@ -380,7 +380,7 @@ func (r *RKE2ConfigServer) findSA(req *http.Request) (string, *corev1.Secret, er
 
 	// The plan service account will likely not exist yet -- the plan service account is created by the bootstrap controller.
 	respSA, err := r.serviceAccounts.Watch(machineNamespace, metav1.ListOptions{
-		LabelSelector: capr.MachineNameLabel + "=" + machineName + "," + capr.RoleLabel + "=" + capr.RolePlan,
+		LabelSelector: capr.MachineNameLabel + "=" + machineName + "," + capr.ServiceAccountRoleLabel + "=" + capr.RolePlan,
 	})
 	if err != nil {
 		return "", nil, err

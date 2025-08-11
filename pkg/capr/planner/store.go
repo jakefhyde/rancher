@@ -514,7 +514,7 @@ func (p *PlanStore) setMachineJoinURL(entry *planEntry, capiCluster *capi.Cluste
 			return err
 		}
 	} else {
-		if entry.Machine.Status.NodeInfo == nil {
+		if len(entry.Machine.Status.Addresses) == 0 {
 			return nil
 		}
 
