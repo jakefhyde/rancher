@@ -36,6 +36,22 @@ func (c *FakeRkeV1) ETCDSnapshots(namespace string) v1.ETCDSnapshotInterface {
 	return newFakeETCDSnapshots(c, namespace)
 }
 
+func (c *FakeRkeV1) ImportedBootstraps(namespace string) v1.ImportedBootstrapInterface {
+	return newFakeImportedBootstraps(c, namespace)
+}
+
+func (c *FakeRkeV1) ImportedClusters(namespace string) v1.ImportedClusterInterface {
+	return newFakeImportedClusters(c, namespace)
+}
+
+func (c *FakeRkeV1) ImportedControlPlanes(namespace string) v1.ImportedControlPlaneInterface {
+	return newFakeImportedControlPlanes(c, namespace)
+}
+
+func (c *FakeRkeV1) ImportedMachines(namespace string) v1.ImportedMachineInterface {
+	return newFakeImportedMachines(c, namespace)
+}
+
 func (c *FakeRkeV1) RKEBootstraps(namespace string) v1.RKEBootstrapInterface {
 	return newFakeRKEBootstraps(c, namespace)
 }

@@ -30,6 +30,10 @@ import (
 var (
 	CustomMachineResourceName        = "custommachines"
 	ETCDSnapshotResourceName         = "etcdsnapshots"
+	ImportedBootstrapResourceName    = "importedbootstraps"
+	ImportedClusterResourceName      = "importedclusters"
+	ImportedControlPlaneResourceName = "importedcontrolplanes"
+	ImportedMachineResourceName      = "importedmachines"
 	RKEBootstrapResourceName         = "rkebootstraps"
 	RKEBootstrapTemplateResourceName = "rkebootstraptemplates"
 	RKEClusterResourceName           = "rkeclusters"
@@ -61,6 +65,14 @@ func addKnownTypes(scheme *runtime.Scheme) error {
 		&CustomMachineList{},
 		&ETCDSnapshot{},
 		&ETCDSnapshotList{},
+		&ImportedBootstrap{},
+		&ImportedBootstrapList{},
+		&ImportedCluster{},
+		&ImportedClusterList{},
+		&ImportedControlPlane{},
+		&ImportedControlPlaneList{},
+		&ImportedMachine{},
+		&ImportedMachineList{},
 		&RKEBootstrap{},
 		&RKEBootstrapList{},
 		&RKEBootstrapTemplate{},

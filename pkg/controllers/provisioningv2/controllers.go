@@ -3,6 +3,7 @@ package provisioningv2
 import (
 	"context"
 
+	"github.com/rancher/rancher/pkg/controllers/capr/imported"
 	"github.com/rancher/rancher/pkg/controllers/provisioningv2/cluster"
 	"github.com/rancher/rancher/pkg/controllers/provisioningv2/fleetcluster"
 	"github.com/rancher/rancher/pkg/controllers/provisioningv2/fleetworkspace"
@@ -35,4 +36,6 @@ func Register(ctx context.Context, clients *wrangler.Context, kubeconfigManager 
 	if features.Harvester.Enabled() {
 		harvestercleanup.Register(ctx, clients)
 	}
+
+	imported.Register(ctx, clients)
 }

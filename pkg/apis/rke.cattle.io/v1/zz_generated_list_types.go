@@ -60,6 +60,74 @@ func NewETCDSnapshot(namespace, name string, obj ETCDSnapshot) *ETCDSnapshot {
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 
+// ImportedBootstrapList is a list of ImportedBootstrap resources
+type ImportedBootstrapList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []ImportedBootstrap `json:"items"`
+}
+
+func NewImportedBootstrap(namespace, name string, obj ImportedBootstrap) *ImportedBootstrap {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("ImportedBootstrap").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ImportedClusterList is a list of ImportedCluster resources
+type ImportedClusterList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []ImportedCluster `json:"items"`
+}
+
+func NewImportedCluster(namespace, name string, obj ImportedCluster) *ImportedCluster {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("ImportedCluster").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ImportedControlPlaneList is a list of ImportedControlPlane resources
+type ImportedControlPlaneList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []ImportedControlPlane `json:"items"`
+}
+
+func NewImportedControlPlane(namespace, name string, obj ImportedControlPlane) *ImportedControlPlane {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("ImportedControlPlane").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ImportedMachineList is a list of ImportedMachine resources
+type ImportedMachineList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata"`
+
+	Items []ImportedMachine `json:"items"`
+}
+
+func NewImportedMachine(namespace, name string, obj ImportedMachine) *ImportedMachine {
+	obj.APIVersion, obj.Kind = SchemeGroupVersion.WithKind("ImportedMachine").ToAPIVersionAndKind()
+	obj.Name = name
+	obj.Namespace = namespace
+	return &obj
+}
+
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
 // RKEBootstrapList is a list of RKEBootstrap resources
 type RKEBootstrapList struct {
 	metav1.TypeMeta `json:",inline"`

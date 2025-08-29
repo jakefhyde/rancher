@@ -7,9 +7,11 @@ import (
 )
 
 type ApiserverSpec struct {
-	AgentImage              string                 `json:"agentImage"`
-	AuthEndpoint            *AuthEndpoint          `json:"localClusterAuthEndpoint"`
+	AgentImage   *string       `json:"agentImage,omitempty"`
+	AuthEndpoint *AuthEndpoint `json:"localClusterAuthEndpoint"`
+	// TODO: consider making this patches instead?
 	AgentDeploymentTemplate *appsv1.DeploymentSpec `json:"agentDeploymentTemplate"`
+	// TODO: finish adding fields
 }
 
 type AuthEndpoint struct {
@@ -21,6 +23,7 @@ type AuthEndpoint struct {
 type ApiserverStatus struct {
 	Conditions []Condition `json:"conditions,omitempty"`
 	Connected  bool        `json:"connected,omitempty"`
+	// TODO: finish adding fields
 }
 
 // ConditionType is a valid value for Condition.Type.

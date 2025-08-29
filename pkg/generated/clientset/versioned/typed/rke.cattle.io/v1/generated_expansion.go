@@ -22,6 +22,14 @@ type CustomMachineExpansion interface{}
 
 type ETCDSnapshotExpansion interface{}
 
+type ImportedBootstrapExpansion interface{}
+
+type ImportedClusterExpansion interface{}
+
+type ImportedControlPlaneExpansion interface{}
+
+type ImportedMachineExpansion interface{}
+
 type RKEBootstrapExpansion interface{}
 
 type RKEBootstrapTemplateExpansion interface{}

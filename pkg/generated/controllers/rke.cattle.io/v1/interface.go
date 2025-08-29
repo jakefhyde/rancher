@@ -33,6 +33,10 @@ func init() {
 type Interface interface {
 	CustomMachine() CustomMachineController
 	ETCDSnapshot() ETCDSnapshotController
+	ImportedBootstrap() ImportedBootstrapController
+	ImportedCluster() ImportedClusterController
+	ImportedControlPlane() ImportedControlPlaneController
+	ImportedMachine() ImportedMachineController
 	RKEBootstrap() RKEBootstrapController
 	RKEBootstrapTemplate() RKEBootstrapTemplateController
 	RKECluster() RKEClusterController
@@ -55,6 +59,22 @@ func (v *version) CustomMachine() CustomMachineController {
 
 func (v *version) ETCDSnapshot() ETCDSnapshotController {
 	return generic.NewController[*v1.ETCDSnapshot, *v1.ETCDSnapshotList](schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "ETCDSnapshot"}, "etcdsnapshots", true, v.controllerFactory)
+}
+
+func (v *version) ImportedBootstrap() ImportedBootstrapController {
+	return generic.NewController[*v1.ImportedBootstrap, *v1.ImportedBootstrapList](schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "ImportedBootstrap"}, "importedbootstraps", true, v.controllerFactory)
+}
+
+func (v *version) ImportedCluster() ImportedClusterController {
+	return generic.NewController[*v1.ImportedCluster, *v1.ImportedClusterList](schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "ImportedCluster"}, "importedclusters", true, v.controllerFactory)
+}
+
+func (v *version) ImportedControlPlane() ImportedControlPlaneController {
+	return generic.NewController[*v1.ImportedControlPlane, *v1.ImportedControlPlaneList](schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "ImportedControlPlane"}, "importedcontrolplanes", true, v.controllerFactory)
+}
+
+func (v *version) ImportedMachine() ImportedMachineController {
+	return generic.NewController[*v1.ImportedMachine, *v1.ImportedMachineList](schema.GroupVersionKind{Group: "rke.cattle.io", Version: "v1", Kind: "ImportedMachine"}, "importedmachines", true, v.controllerFactory)
 }
 
 func (v *version) RKEBootstrap() RKEBootstrapController {
