@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1/plan"
@@ -17,6 +18,7 @@ import (
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	capi "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/cluster-api/util/conditions"
 )
@@ -107,10 +109,23 @@ func (h *handler) OnChange(_ string, secret *corev1.Secret) (*corev1.Secret, err
 		secretChanged = true
 	}
 
+	machineName, ok := secret.Labels[capr.MachineNameLabel]
+	if !ok {
+		return nil, fmt.Errorf("did not find machine label on secret %s/%s", secret.Namespace, secret.Name)
+	}
+
+	machine, err := h.machinesCache.Get(secret.Namespace, machineName)
+	if err != nil {
+		return nil, err
+	}
+
 	if secretChanged {
 		// don't return the secret at this point, we want to attempt to update the machine status later on
 		secret, err = h.secrets.Update(secret)
-		if err != nil {
+		if apierrors.IsInvalid(err) && strings.Contains(err.Error(), "Too long: must have at most") {
+			err = h.reconcileMachinePlanAppliedCondition(machine, fmt.Errorf("machine-plan secret %s/%s is too long: must have at most 1048576 bytes", secret.Namespace, secret.Name))
+			return secret, err
+		} else if err != nil {
 			return secret, err
 		}
 	}
@@ -137,13 +152,13 @@ func (h *handler) OnChange(_ string, secret *corev1.Secret) (*corev1.Secret, err
 					}
 				}
 			}
-			err = h.reconcileMachinePlanAppliedCondition(secret, fmt.Errorf("error applying plan -- check rancher-system-agent.service%s logs on node for more information", andRuntimeUnit))
+			err = h.reconcileMachinePlanAppliedCondition(machine, fmt.Errorf("error applying plan -- check rancher-system-agent.service%s logs on node for more information", andRuntimeUnit))
 		}
 		return secret, err
 	}
 
 	logrus.Debugf("[plansecret] %s/%s: rv: %s: Reconciling machine PlanApplied condition to nil", secret.Namespace, secret.Name, secret.ResourceVersion)
-	err = h.reconcileMachinePlanAppliedCondition(secret, nil)
+	err = h.reconcileMachinePlanAppliedCondition(machine, nil)
 	return secret, err
 }
 
@@ -174,23 +189,8 @@ func purgePeriodicInstructionOutput(node *plan.Node) bool {
 	return removed
 }
 
-func (h *handler) reconcileMachinePlanAppliedCondition(secret *corev1.Secret, planAppliedErr error) error {
-	if secret == nil {
-		logrus.Debug("[plansecret] secret was nil when reconciling machine status")
-		return nil
-	}
-
+func (h *handler) reconcileMachinePlanAppliedCondition(machine *capi.Machine, planAppliedErr error) error {
 	condition := capi.ConditionType(capr.PlanApplied)
-
-	machineName, ok := secret.Labels[capr.MachineNameLabel]
-	if !ok {
-		return fmt.Errorf("did not find machine label on secret %s/%s", secret.Namespace, secret.Name)
-	}
-
-	machine, err := h.machinesCache.Get(secret.Namespace, machineName)
-	if err != nil {
-		return err
-	}
 
 	machine = machine.DeepCopy()
 
@@ -209,10 +209,11 @@ func (h *handler) reconcileMachinePlanAppliedCondition(secret *corev1.Secret, pl
 		needsUpdate = true
 	}
 
-	if needsUpdate {
-		logrus.Debugf("[plansecret] machine %s/%s: updating status of machine to reconcile for condition with error: %+v", machine.Namespace, machine.Name, planAppliedErr)
-		_, err = h.machinesClient.UpdateStatus(machine)
+	if !needsUpdate {
+		return nil
 	}
 
+	logrus.Debugf("[plansecret] machine %s/%s: updating status of machine to reconcile for condition with error: %+v", machine.Namespace, machine.Name, planAppliedErr)
+	_, err := h.machinesClient.UpdateStatus(machine)
 	return err
 }
