@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/rancher/rancher/pkg/capr"
+	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierror "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,14 +22,12 @@ const (
 	headerPrefix    = "X-Cattle-"
 )
 
-func (r *RKE2ConfigServer) findMachineByClusterToken(req *http.Request) (string, string, error) {
+func (r *RKE2ConfigServer) findMachineByClusterToken(req *http.Request, machineID string) (string, string, error) {
+	logrus.Debugf("[rke2configserver] [%s] finding machine by cluster token", machineID)
+
 	token := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
 	if token == "" {
-		return "", "", nil
-	}
-
-	machineID := req.Header.Get(machineIDHeader)
-	if machineID == "" {
+		logrus.Debugf("[rke2configserver] [%s] invalid empty token", machineID)
 		return "", "", nil
 	}
 
@@ -40,25 +39,32 @@ func (r *RKE2ConfigServer) findMachineByClusterToken(req *http.Request) (string,
 	data := dataFromHeaders(req)
 
 	if len(tokens) == 0 {
+		logrus.Debugf("[rke2configserver] [%s] could not find cluster token", machineID)
 		return "", "", nil
 	}
 
 	secretName := machineRequestSecretName(machineID)
+	logrus.Debugf("[rke2configserver] [%s] found cluster token, attempting to fetch machine-request secret %s/%s", machineID, tokens[0].Namespace, secretName)
 	secret, err := r.secretsCache.Get(tokens[0].Namespace, secretName)
 	if apierror.IsNotFound(err) {
+		logrus.Debugf("[rke2configserver] [%s] found cluster token, attempting to create machine-request secret %s/%s", machineID, tokens[0].Namespace, secretName)
 		secret, err = r.createSecret(tokens[0].Namespace, secretName, data)
 	}
 	if err != nil {
 		return "", "", err
 	}
 
-	secret, err = r.waitReady(secret)
+	secret, err = r.waitReady(secret, machineID)
 	if err != nil {
 		return "", "", err
 	}
 
 	machineNamespace, machineName := secret.Labels[capr.MachineNamespaceLabel], secret.Labels[capr.MachineNameLabel]
-	_ = r.secrets.Delete(secret.Namespace, secret.Name, nil)
+	logrus.Debugf("[rke2configserver] [%s] found machine %s/%s", machineID, machineNamespace, machineName)
+	err = r.secrets.Delete(secret.Namespace, secret.Name, nil)
+	if err != nil {
+		logrus.Errorf("[rke2configserver] error deleting secret %s/%s: %v", secret.Namespace, secret.Name, err)
+	}
 	return machineNamespace, machineName, nil
 }
 
@@ -96,11 +102,14 @@ func (r *RKE2ConfigServer) createSecret(namespace, name string, data map[string]
 	})
 }
 
-func (r *RKE2ConfigServer) waitReady(secret *corev1.Secret) (*corev1.Secret, error) {
-	if secret.Labels[capr.MachineNameLabel] != "" {
+func (r *RKE2ConfigServer) waitReady(secret *corev1.Secret, machineID string) (*corev1.Secret, error) {
+	logrus.Debugf("[rke2configserver] [%s] waiting for secret %s/%s to be ready", machineID, secret.Namespace, secret.Name)
+	if name := secret.Labels[capr.MachineNameLabel]; name != "" {
+		logrus.Debugf("[rke2configserver] [%s] secret %s/%s already has label %s=%s", machineID, secret.Namespace, secret.Name, capr.MachineNameLabel, name)
 		return secret, nil
 	}
 
+	logrus.Debugf("[rke2configserver] [%s] starting 120s watch for secret %s/%s", machineID, secret.Namespace, secret.Name)
 	resp, err := r.secrets.Watch(secret.Namespace, metav1.ListOptions{
 		TimeoutSeconds: &[]int64{120}[0],
 		FieldSelector:  "metadata.name=" + secret.Name,
@@ -115,8 +124,10 @@ func (r *RKE2ConfigServer) waitReady(secret *corev1.Secret) (*corev1.Secret, err
 	}()
 
 	for obj := range resp.ResultChan() {
+		logrus.Debugf("[rke2configserver] [%s] checking if secret %s/%s is ready", machineID, secret.Namespace, secret.Name)
 		secret, ok := obj.Object.(*corev1.Secret)
 		if ok && secret.Labels[capr.MachineNameLabel] != "" {
+			logrus.Debugf("[rke2configserver] [%s] secret %s/%s is ready", machineID, secret.Namespace, secret.Name)
 			return secret, nil
 		}
 	}

@@ -89,6 +89,7 @@ func New(clients *wrangler.Context) *RKE2ConfigServer {
 }
 
 func (r *RKE2ConfigServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	logrus.Debugf("[rke2configserver] serving http for %s", req.URL.Path)
 	if !r.secrets.Informer().HasSynced() || !r.clusterTokens.Informer().HasSynced() {
 		if err := r.secrets.Informer().GetIndexer().Resync(); err != nil {
 			logrus.Errorf("error re-syncing secrets informer in rke2configserver: %v", err)
@@ -99,14 +100,18 @@ func (r *RKE2ConfigServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) 
 		rw.WriteHeader(http.StatusUnauthorized)
 		return
 	}
+
 	planSecret, secret, err := r.findSA(req)
 	if apierrors.IsNotFound(err) {
+		logrus.Debugf("[rke2configserver] could not find service account: %v", err)
 		rw.WriteHeader(http.StatusUnauthorized)
 		return
 	} else if err != nil {
+		logrus.Debugf("[rke2configserver] error finding service account: %v", err)
 		http.Error(rw, err.Error(), http.StatusInternalServerError)
 		return
 	} else if secret == nil || secret.Data[corev1.ServiceAccountTokenKey] == nil {
+		logrus.Debugf("[rke2configserver] service account token secret was not populated")
 		rw.WriteHeader(http.StatusUnauthorized)
 		return
 	}
@@ -292,19 +297,21 @@ func (r *RKE2ConfigServer) getClusterKubernetesVersion(clusterName, ns string) (
 
 // findSA uses the request machineID to find and deliver the plan secret name and a service account token (or an error).
 func (r *RKE2ConfigServer) findSA(req *http.Request) (string, *corev1.Secret, error) {
+	logrus.Debugf("[rke2configserver] finding service account")
 	machineID := req.Header.Get(machineIDHeader)
 	logrus.Debugf("[rke2configserver] parsed %s as machineID", machineID)
 	if machineID == "" {
+		logrus.Debugf("[rke2configserver] no machine id found in header")
 		return "", nil, nil
 	}
 
-	machineNamespace, machineName, err := r.findMachineByProvisioningSA(req)
+	machineNamespace, machineName, err := r.findMachineByProvisioningSA(req, machineID)
 	if err != nil {
 		return "", nil, err
 	}
-	logrus.Debugf("[rke2configserver] Got %s/%s machine from provisioning SA", machineNamespace, machineName)
+	logrus.Debugf("[rke2configserver] Got %s/%s machine from provisioning service account", machineNamespace, machineName)
 	if machineName == "" {
-		machineNamespace, machineName, err = r.findMachineByClusterToken(req)
+		machineNamespace, machineName, err = r.findMachineByClusterToken(req, machineID)
 		if err != nil {
 			return "", nil, err
 		}
