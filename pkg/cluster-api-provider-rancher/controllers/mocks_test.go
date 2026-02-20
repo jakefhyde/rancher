@@ -1,4 +1,4 @@
-package machineprovision
+package controllers
 
 import (
 	"time"

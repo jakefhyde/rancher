@@ -20,13 +20,13 @@ import (
 	capiannotations "sigs.k8s.io/cluster-api/util/annotations"
 )
 
-type handler struct {
+type clusterHandler struct {
 	rkeCluster       rkecontroller.RKEClusterController
 	capiClusterCache capicontrollers.ClusterCache
 }
 
 func RegisterCluster(ctx context.Context, clients *wrangler.CAPIContext) {
-	h := handler{
+	h := clusterHandler{
 		rkeCluster:       clients.RKE.RKECluster(),
 		capiClusterCache: clients.CAPI.Cluster().Cache(),
 	}
@@ -43,7 +43,7 @@ func RegisterCluster(ctx context.Context, clients *wrangler.CAPIContext) {
 	}, clients.RKE.RKECluster(), clients.CAPI.Cluster())
 }
 
-func (h *handler) OnChange(_ string, cluster *v1.RKECluster) (*v1.RKECluster, error) {
+func (h *clusterHandler) OnChange(_ string, cluster *v1.RKECluster) (*v1.RKECluster, error) {
 	if cluster == nil {
 		return nil, nil
 	}

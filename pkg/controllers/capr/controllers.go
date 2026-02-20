@@ -12,7 +12,6 @@ import (
 	"github.com/rancher/rancher/pkg/controllers/capr/dynamicschema"
 	"github.com/rancher/rancher/pkg/controllers/capr/machinedrain"
 	"github.com/rancher/rancher/pkg/controllers/capr/machinenodelookup"
-	"github.com/rancher/rancher/pkg/controllers/capr/machineprovision"
 	"github.com/rancher/rancher/pkg/controllers/capr/managesystemagent"
 	"github.com/rancher/rancher/pkg/controllers/capr/plansecret"
 	"github.com/rancher/rancher/pkg/controllers/capr/unmanaged"
@@ -43,7 +42,7 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigMana
 		GetBootstrapManifests:   prebootstrap.NewRetriever(clients).GeneratePreBootstrapClusterAgentManifest,
 	})
 	if features.MCM.Enabled() {
-		machineprovision.Register(ctx, clients, kubeconfigManager)
+		rkeinfracontrollers.Register(ctx, clients, kubeconfigManager)
 		autoscaler.Register(ctx, clients)
 	}
 	machinenodelookup.Register(ctx, clients, kubeconfigManager)
