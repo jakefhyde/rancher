@@ -6,6 +6,7 @@ import (
 	"github.com/rancher/rancher/pkg/capr"
 	"github.com/rancher/rancher/pkg/capr/planner"
 	rkebootstrapcontrollers "github.com/rancher/rancher/pkg/cluster-api-provider-rancher/bootstrap/controllers"
+	rkeinfracontrollers "github.com/rancher/rancher/pkg/cluster-api-provider-rancher/controllers"
 	rkecontrolplanecontroller "github.com/rancher/rancher/pkg/cluster-api-provider-rancher/controlplane/controllers"
 	"github.com/rancher/rancher/pkg/controllers/capr/autoscaler"
 	"github.com/rancher/rancher/pkg/controllers/capr/dynamicschema"
@@ -14,7 +15,6 @@ import (
 	"github.com/rancher/rancher/pkg/controllers/capr/machineprovision"
 	"github.com/rancher/rancher/pkg/controllers/capr/managesystemagent"
 	"github.com/rancher/rancher/pkg/controllers/capr/plansecret"
-	"github.com/rancher/rancher/pkg/controllers/capr/rkecluster"
 	"github.com/rancher/rancher/pkg/controllers/capr/unmanaged"
 	"github.com/rancher/rancher/pkg/features"
 	"github.com/rancher/rancher/pkg/provisioningv2/image"
@@ -46,7 +46,6 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigMana
 		machineprovision.Register(ctx, clients, kubeconfigManager)
 		autoscaler.Register(ctx, clients)
 	}
-	rkecluster.Register(ctx, clients)
 	machinenodelookup.Register(ctx, clients, kubeconfigManager)
 	plansecret.Register(ctx, clients)
 	unmanaged.Register(ctx, clients, kubeconfigManager)
@@ -55,6 +54,7 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigMana
 
 	rkebootstrapcontrollers.Register(ctx, clients)
 	rkecontrolplanecontroller.Register(ctx, clients, rkePlanner)
+	rkeinfracontrollers.RegisterCluster(ctx, clients)
 
 	return nil
 }
