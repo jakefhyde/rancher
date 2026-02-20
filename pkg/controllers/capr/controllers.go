@@ -15,7 +15,6 @@ import (
 	"github.com/rancher/rancher/pkg/controllers/capr/managesystemagent"
 	"github.com/rancher/rancher/pkg/controllers/capr/plansecret"
 	"github.com/rancher/rancher/pkg/controllers/capr/rkecluster"
-	"github.com/rancher/rancher/pkg/controllers/capr/rkecontrolplane"
 	"github.com/rancher/rancher/pkg/controllers/capr/unmanaged"
 	"github.com/rancher/rancher/pkg/features"
 	"github.com/rancher/rancher/pkg/provisioningv2/image"
@@ -52,7 +51,6 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigMana
 	machinenodelookup.Register(ctx, clients, kubeconfigManager)
 	plansecret.Register(ctx, clients)
 	unmanaged.Register(ctx, clients, kubeconfigManager)
-	rkecontrolplane.Register(ctx, clients)
 	managesystemagent.Register(ctx, clients)
 	machinedrain.Register(ctx, clients)
 
