@@ -77,7 +77,7 @@ type driverArgs struct {
 	BackoffLimit        int32
 }
 
-func (h *handler) getArgsEnvAndStatus(infra *infraObject, args map[string]any, driver string, create bool) (driverArgs, error) {
+func (h *machineHandler) getArgsEnvAndStatus(infra *infraObject, args map[string]any, driver string, create bool) (driverArgs, error) {
 	var (
 		url, hash, cloudCredentialSecretName string
 		jobBackoffLimit                      int32
@@ -201,7 +201,7 @@ func (h *handler) getArgsEnvAndStatus(infra *infraObject, args map[string]any, d
 	}, nil
 }
 
-func (h *handler) getBootstrapSecret(machine *capi.Machine) (string, error) {
+func (h *machineHandler) getBootstrapSecret(machine *capi.Machine) (string, error) {
 	if machine == nil || !machine.Spec.Bootstrap.ConfigRef.IsDefined() {
 		return "", nil
 	}
@@ -220,7 +220,7 @@ func (h *handler) getBootstrapSecret(machine *capi.Machine) (string, error) {
 	return d.String("status", "dataSecretName"), nil
 }
 
-func (h *handler) getSecretData(machine *capi.Machine, obj data.Object, create bool) (string, string, map[string]string, error) {
+func (h *machineHandler) getSecretData(machine *capi.Machine, obj data.Object, create bool) (string, string, map[string]string, error) {
 	var (
 		err    error
 		result = map[string]string{}

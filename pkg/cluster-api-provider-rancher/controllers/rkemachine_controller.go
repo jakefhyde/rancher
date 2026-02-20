@@ -93,7 +93,7 @@ type dynamicController interface {
 	EnqueueAfter(gvk schema.GroupVersionKind, namespace, name string, delay time.Duration) error
 }
 
-type handler struct {
+type machineHandler struct {
 	ctx                 context.Context
 	apply               apply.Apply
 	jobController       batchcontrollers.JobController
@@ -113,7 +113,7 @@ type handler struct {
 }
 
 func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigManager *kubeconfig.Manager) {
-	h := &handler{
+	h := &machineHandler{
 		ctx: ctx,
 		apply: clients.Apply.WithCacheTypes(clients.Core.Secret(),
 			clients.Core.ServiceAccount(),
@@ -150,7 +150,7 @@ func validGVK(gvk schema.GroupVersionKind) bool {
 		gvk.Kind != "CustomMachine"
 }
 
-func (h *handler) OnJobChange(_ string, job *batchv1.Job) (*batchv1.Job, error) {
+func (h *machineHandler) OnJobChange(_ string, job *batchv1.Job) (*batchv1.Job, error) {
 	if job == nil {
 		return nil, nil
 	}
@@ -198,7 +198,7 @@ func (h *handler) OnJobChange(_ string, job *batchv1.Job) (*batchv1.Job, error) 
 	return job, nil
 }
 
-func (h *handler) getMachineStatus(job *batchv1.Job) (rkev1.RKEMachineStatus, error) {
+func (h *machineHandler) getMachineStatus(job *batchv1.Job) (rkev1.RKEMachineStatus, error) {
 	condType := createJobConditionType
 	if job.Spec.Template.Labels[InfraJobRemove] == "true" {
 		condType = deleteJobConditionType
@@ -301,7 +301,7 @@ func getMachineStatusFromPod(pod *corev1.Pod, condType string) rkev1.RKEMachineS
 	return rkev1.RKEMachineStatus{}
 }
 
-func (h *handler) namespaceIsRemoved(obj runtime.Object) (bool, error) {
+func (h *machineHandler) namespaceIsRemoved(obj runtime.Object) (bool, error) {
 	meta, err := meta.Accessor(obj)
 	if err != nil {
 		return false, err
@@ -315,7 +315,7 @@ func (h *handler) namespaceIsRemoved(obj runtime.Object) (bool, error) {
 	return ns.DeletionTimestamp != nil, nil
 }
 
-func (h *handler) OnRemove(key string, obj runtime.Object) (runtime.Object, error) {
+func (h *machineHandler) OnRemove(key string, obj runtime.Object) (runtime.Object, error) {
 	if removed, err := h.namespaceIsRemoved(obj); err != nil || removed {
 		return obj, err
 	}
@@ -342,7 +342,7 @@ func (h *handler) OnRemove(key string, obj runtime.Object) (runtime.Object, erro
 			return obj, err
 		}
 		logrus.Debugf("[machineprovision] create job for %s not finished, job was found and the error was not nil and was not an isnotfound", key)
-		// WaitForClient handler will not run when the infra machine is being deleted, we have to reconcile here in order to
+		// WaitForClient machineHandler will not run when the infra machine is being deleted, we have to reconcile here in order to
 		// finish the create job, since it has to have completed successfully or never ran for the delete job to run
 		state, _, err := h.run(infra, true)
 		if err != nil {
@@ -430,7 +430,7 @@ func (h *handler) OnRemove(key string, obj runtime.Object) (runtime.Object, erro
 	return h.doRemove(infra)
 }
 
-func (h *handler) doRemove(infra *infraObject) (runtime.Object, error) {
+func (h *machineHandler) doRemove(infra *infraObject) (runtime.Object, error) {
 	state, _, err := h.run(infra, false)
 	if err != nil {
 		return infra.obj, err
@@ -502,7 +502,7 @@ func (h *handler) doRemove(infra *infraObject) (runtime.Object, error) {
 	return infra.obj, generic.ErrSkip
 }
 
-func (h *handler) EnqueueAfter(infra *infraObject, duration time.Duration) {
+func (h *machineHandler) EnqueueAfter(infra *infraObject, duration time.Duration) {
 	err := h.dynamic.EnqueueAfter(infra.obj.GetObjectKind().GroupVersionKind(), infra.meta.GetNamespace(), infra.meta.GetName(), duration)
 	if err != nil {
 		logrus.Errorf("[machineprovision] error enqueuing %s %s/%s: %v", infra.obj.GetObjectKind().GroupVersionKind(), infra.meta.GetNamespace(), infra.meta.GetName(), err)
@@ -510,7 +510,7 @@ func (h *handler) EnqueueAfter(infra *infraObject, duration time.Duration) {
 }
 
 // OnChange is called whenever the infrastructure machine is updated, including when the object is being deleted.
-func (h *handler) OnChange(obj runtime.Object) (runtime.Object, error) {
+func (h *machineHandler) OnChange(obj runtime.Object) (runtime.Object, error) {
 	infra, err := newInfraObject(obj)
 	if err != nil {
 		return obj, err
@@ -669,7 +669,7 @@ func jobFailureTime(job *batchv1.Job) *time.Time {
 
 // infraMachineDeletionEnqueueingTime determines the duration we want to
 // keep the infraMachine alive based on job failure time and configured deletion settings.
-func (h *handler) infraMachineDeletionEnqueueingTime(infra *infraObject, currentTime time.Time, deleteOnFailureAfter time.Duration) (time.Duration, error) {
+func (h *machineHandler) infraMachineDeletionEnqueueingTime(infra *infraObject, currentTime time.Time, deleteOnFailureAfter time.Duration) (time.Duration, error) {
 
 	if deleteOnFailureAfter <= 0 {
 		return 0, nil
@@ -711,7 +711,7 @@ func (h *handler) infraMachineDeletionEnqueueingTime(infra *infraObject, current
 	return deleteOnFailureAfter - timeSinceFailure, nil
 }
 
-func (h *handler) run(infra *infraObject, create bool) (rkev1.RKEMachineStatus, bool, error) {
+func (h *machineHandler) run(infra *infraObject, create bool) (rkev1.RKEMachineStatus, bool, error) {
 	logrus.Infof("[machineprovision] %s/%s: reconciling machine job", infra.meta.GetNamespace(), infra.meta.GetName())
 
 	args := infra.data.Map("spec")
@@ -790,7 +790,7 @@ func reconcileStatus(d data.Object, state rkev1.RKEMachineStatus) error {
 	return nil
 }
 
-func (h *handler) getJobFromInfraMachine(infra *infraObject) (*batchv1.Job, error) {
+func (h *machineHandler) getJobFromInfraMachine(infra *infraObject) (*batchv1.Job, error) {
 	gvk := infra.obj.GetObjectKind().GroupVersionKind()
 	jobs, err := h.jobs.List(infra.meta.GetNamespace(), labels.Set{
 		InfraMachineGroup:   gvk.Group,
@@ -843,7 +843,7 @@ func constructFilesSecret(aliasedFields string, config map[string]interface{}) *
 	return &corev1.Secret{Data: secretData}
 }
 
-func (h *handler) constructCertsSecret(machineName, machineNamespace string) (*corev1.Secret, error) {
+func (h *machineHandler) constructCertsSecret(machineName, machineNamespace string) (*corev1.Secret, error) {
 	certSecretData := make(map[string][]byte)
 
 	cert := settings.CACerts.Get()
