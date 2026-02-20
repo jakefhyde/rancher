@@ -1,4 +1,4 @@
-package bootstrap
+package controllers
 
 import (
 	"crypto/sha256"
