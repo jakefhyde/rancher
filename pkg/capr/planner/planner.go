@@ -323,8 +323,16 @@ func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlan
 		return status, err
 	}
 
-	if status, err = p.createEtcdSnapshot(cp, status, clusterSecretTokens, plan); err != nil {
-		return status, err
+	if cp.Spec.ETCDSnapshotCreate != nil && cp.Spec.ETCDSnapshotCreate != status.ETCDSnapshotCreate {
+		if etcdSnapshotCreatePhase, err := p.createEtcdSnapshot(cp.Spec.ETCDSnapshotCreate, capr.GetRuntimeCommand(cp.Spec.KubernetesVersion), cp.Spec.KubernetesVersion, status.ETCDSnapshotCreatePhase, plan); err != nil {
+			return status, err
+		} else if etcdSnapshotCreatePhase != "" {
+			status.ETCDSnapshotCreatePhase = etcdSnapshotCreatePhase
+			return status, errWaiting("refreshing etcd create state")
+		}
+		status.ETCDSnapshotCreate = cp.Spec.ETCDSnapshotCreate
+		status.ETCDSnapshotCreatePhase = ""
+		return status, errWaiting("refreshing etcd create state")
 	}
 
 	if status, err = p.restoreEtcdSnapshot(cp, status, clusterSecretTokens, plan, currentVersion); err != nil {

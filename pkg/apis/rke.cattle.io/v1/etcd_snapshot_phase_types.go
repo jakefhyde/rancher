@@ -22,9 +22,6 @@ const (
 	// ETCDSnapshotPhasePostRestoreNodeCleanup is the state assigned to the RKEControlPlane when the etcd restore operation is cleaning up resources on the downstream node post-restore operation.
 	ETCDSnapshotPhasePostRestoreNodeCleanup = ETCDSnapshotPhase("PostRestoreNodeCleanup")
 
-	// ETCDSnapshotPhaseRestartCluster is the state assigned to the RKEControlPlane when the etcd snapshot create/restore operation is restarting the cluster.
-	ETCDSnapshotPhaseRestartCluster = ETCDSnapshotPhase("RestartCluster")
-
 	// ETCDSnapshotPhaseFinished is the state assigned to the RKEControlPlane upon successful completion of the snapshot create/restore operation.
 	ETCDSnapshotPhaseFinished = ETCDSnapshotPhase("Finished")
 
