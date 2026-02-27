@@ -323,11 +323,13 @@ func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlan
 		return status, err
 	}
 
+	info := NewCAPRDistroInfo(cp)
+
 	if cp.Spec.ETCDSnapshotCreate != nil && cp.Spec.ETCDSnapshotCreate != status.ETCDSnapshotCreate {
-		if etcdSnapshotCreatePhase, err := p.createEtcdSnapshot(cp.Spec.ETCDSnapshotCreate, capr.GetRuntimeCommand(cp.Spec.KubernetesVersion), cp.Spec.KubernetesVersion, status.ETCDSnapshotCreatePhase, plan); err != nil {
+		if phase, err := p.createEtcdSnapshot(info, cp.Spec.ETCDSnapshotCreate, status.ETCDSnapshotCreatePhase, plan); err != nil {
 			return status, err
-		} else if etcdSnapshotCreatePhase != "" {
-			status.ETCDSnapshotCreatePhase = etcdSnapshotCreatePhase
+		} else if phase != "" {
+			status.ETCDSnapshotCreatePhase = phase
 			return status, errWaiting("refreshing etcd create state")
 		}
 		status.ETCDSnapshotCreate = cp.Spec.ETCDSnapshotCreate
@@ -339,12 +341,24 @@ func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlan
 		return status, err
 	}
 
-	if status, err = p.rotateCertificates(cp, status, clusterSecretTokens, plan); err != nil {
-		return status, err
+	if cp.Spec.RotateCertificates != nil && cp.Spec.RotateCertificates.Generation != status.CertificateRotationGeneration {
+		if err := p.rotateCertificates(info, cp.Spec.RotateCertificates, plan); err != nil {
+			return status, err
+		}
+		status.CertificateRotationGeneration = cp.Spec.RotateCertificates.Generation
+		return status, errWaiting("refreshing encryption key rotation state")
 	}
 
-	if status, err = p.rotateEncryptionKeys(cp, status, clusterSecretTokens, plan, releaseData); err != nil {
-		return status, err
+	if cp.Spec.RotateEncryptionKeys != nil && cp.Spec.RotateEncryptionKeys != status.RotateEncryptionKeys {
+		if phase, err := p.rotateEncryptionKeys(info, cp.Spec.RotateEncryptionKeys, status.RotateEncryptionKeysPhase, plan, nil, nil); err != nil {
+			return status, err
+		} else if phase != "" {
+			status.RotateEncryptionKeysPhase = phase
+			return status, errWaiting("refreshing encryption key rotation state")
+		}
+		status.RotateEncryptionKeys = cp.Spec.RotateEncryptionKeys
+		status.RotateEncryptionKeysPhase = ""
+		return status, errWaiting("refreshing encryption key rotation state")
 	}
 
 	// pausing the control plane only affects machine reconciliation: etcd snapshot/restore, encryption key & cert

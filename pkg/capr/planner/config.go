@@ -321,9 +321,9 @@ func addOtherFiles(nodePlan plan.NodePlan, controlPlane *rkev1.RKEControlPlane, 
 	return nodePlan, nil
 }
 
-func restartStamp(nodePlan plan.NodePlan, controlPlane *rkev1.RKEControlPlane, image string) string {
+func restartStamp(info DistroInfo, nodePlan plan.NodePlan, image string) string {
 	restartStamp := sha256.New()
-	restartStamp.Write([]byte(strconv.Itoa(controlPlane.Spec.ProvisionGeneration)))
+	restartStamp.Write([]byte(strconv.Itoa(info.ProvisionGeneration())))
 	restartStamp.Write([]byte(image))
 	for _, file := range nodePlan.Files {
 		if file.Dynamic {
@@ -332,13 +332,13 @@ func restartStamp(nodePlan plan.NodePlan, controlPlane *rkev1.RKEControlPlane, i
 		restartStamp.Write([]byte(file.Path))
 		restartStamp.Write([]byte(file.Content))
 	}
-	restartStamp.Write([]byte(strconv.FormatInt(controlPlane.Status.ConfigGeneration, 10)))
+	restartStamp.Write([]byte(strconv.FormatInt(info.ConfigGeneration(), 10)))
 	return hex.EncodeToString(restartStamp.Sum(nil))
 }
 
-func drainHash(nodePlan plan.NodePlan, controlPlane *rkev1.RKEControlPlane, image string) string {
+func drainHash(info DistroInfo, nodePlan plan.NodePlan, image string) string {
 	h := sha256.New()
-	h.Write([]byte(strconv.Itoa(controlPlane.Spec.ProvisionGeneration)))
+	h.Write([]byte(strconv.Itoa(info.ProvisionGeneration())))
 	h.Write([]byte(image))
 	for _, file := range nodePlan.Files {
 		if file.Dynamic {
@@ -351,7 +351,7 @@ func drainHash(nodePlan plan.NodePlan, controlPlane *rkev1.RKEControlPlane, imag
 			h.Write([]byte(file.Content))
 		}
 	}
-	h.Write([]byte(strconv.FormatInt(controlPlane.Status.ConfigGeneration, 10)))
+	h.Write([]byte(strconv.FormatInt(info.ConfigGeneration(), 10)))
 	return hex.EncodeToString(h.Sum(nil))
 }
 

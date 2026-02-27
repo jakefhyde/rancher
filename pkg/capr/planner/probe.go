@@ -116,7 +116,7 @@ func renderSecureProbe(arg any, rawProbe plan.Probe, controlPlane *rkev1.RKECont
 
 // generateProbes generates probes for the machine (based on type of machine) to the nodePlan and returns the probes and
 // an error if one occurred.
-func (p *Planner) generateProbes(controlPlane *rkev1.RKEControlPlane, entry *planEntry, config map[string]any) (map[string]plan.Probe, error) {
+func generateProbes(controlPlane *rkev1.RKEControlPlane, entry *planEntry, config map[string]any) (map[string]plan.Probe, error) {
 	var (
 		runtime    = capr.GetRuntime(controlPlane.Spec.KubernetesVersion)
 		probeNames []string

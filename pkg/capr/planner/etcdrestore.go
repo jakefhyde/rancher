@@ -349,7 +349,6 @@ func (p *Planner) generateEtcdSnapshotRestorePlan(controlPlane *rkev1.RKEControl
 	runtime := capr.GetRuntime(controlPlane.Spec.KubernetesVersion)
 
 	nodePlan.Instructions = append(nodePlan.Instructions, convertToIdempotentInstruction(
-		controlPlane,
 		"etcd-restore/restore-kill-all",
 		fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore),
 		generateKillAllInstruction(controlPlane)))
@@ -357,7 +356,6 @@ func (p *Planner) generateEtcdSnapshotRestorePlan(controlPlane *rkev1.RKEControl
 	if runtime == capr.RuntimeRKE2 {
 		if generated, instruction := generateManifestRemovalInstruction(controlPlane, entry); generated {
 			nodePlan.Instructions = append(nodePlan.Instructions, convertToIdempotentInstruction(
-				controlPlane,
 				"etcd-restore/restore-manifest-removal",
 				fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore),
 				instruction))
@@ -368,7 +366,6 @@ func (p *Planner) generateEtcdSnapshotRestorePlan(controlPlane *rkev1.RKEControl
 	nodePlan.Instructions = append(nodePlan.Instructions,
 		p.generateInstallInstructionWithSkipStart(controlPlane, entry),
 		convertToIdempotentInstruction(
-			controlPlane,
 			"etcd-restore/clean-etcd-dir",
 			fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore), plan.OneTimeInstruction{
 				Name:    "remove-etcd-db-dir",
@@ -378,7 +375,6 @@ func (p *Planner) generateEtcdSnapshotRestorePlan(controlPlane *rkev1.RKEControl
 					path.Join(capr.GetDistroDataDir(controlPlane), "server/db/etcd"),
 				}}),
 		idempotentInstruction(
-			controlPlane,
 			"etcd-restore/restore",
 			fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore),
 			capr.GetRuntimeCommand(controlPlane.Spec.KubernetesVersion),
@@ -449,7 +445,6 @@ func (p *Planner) generateEtcdRestorePodCleanupFilesAndInstruction(controlPlane 
 
 	instructions := []plan.OneTimeInstruction{
 		idempotentInstruction(
-			controlPlane,
 			"etcd-restore/pods-wait-for-podlist",
 			fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore),
 			"/bin/sh",
@@ -465,7 +460,6 @@ func (p *Planner) generateEtcdRestorePodCleanupFilesAndInstruction(controlPlane 
 			},
 			[]string{}),
 		idempotentInstruction(
-			controlPlane,
 			"etcd-restore/wait-for-desired-ready-nodes",
 			fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore),
 			"/bin/sh",
@@ -504,7 +498,6 @@ func (p *Planner) generateEtcdRestorePodCleanupFilesAndInstruction(controlPlane 
 	for i, podSelector := range podSelectors {
 		if namespace, labelSelector, usable := strings.Cut(podSelector, ":"); usable {
 			instructions = append(instructions, idempotentInstruction(
-				controlPlane,
 				fmt.Sprintf("etcd-restore/post-restore-cleanup-pods-%d", i),
 				fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore),
 				kubectl,
@@ -561,7 +554,6 @@ func (p *Planner) generateEtcdRestoreNodeCleanupFilesAndInstruction(controlPlane
 
 	instructions := []plan.OneTimeInstruction{
 		idempotentInstruction(
-			controlPlane,
 			"etcd-restore/cleanup-nodes",
 			fmt.Sprintf("%v", controlPlane.Status.ETCDSnapshotRestore),
 			"/bin/sh",
@@ -666,7 +658,7 @@ func (p *Planner) runEtcdRestoreServiceStop(controlPlane *rkev1.RKEControlPlane,
 			return err
 		}
 		// Clean up previous restoration tracking attempts before starting this restoration.
-		stopPlan.Instructions = append(stopPlan.Instructions, generateIdempotencyCleanupInstruction(controlPlane, "etcd-restore"))
+		stopPlan.Instructions = append(stopPlan.Instructions, generateIdempotencyCleanupInstruction("etcd-restore"))
 		if isEtcd(server) {
 			stopPlan.Instructions = append(stopPlan.Instructions, generateCreateEtcdTombstoneInstruction(controlPlane))
 		}
