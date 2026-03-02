@@ -337,7 +337,7 @@ func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlan
 		return status, errWaiting("refreshing etcd create state")
 	}
 
-	if status, err = p.restoreEtcdSnapshot(cp, status, clusterSecretTokens, plan, currentVersion); err != nil {
+	if status, err = p.restoreEtcdSnapshot(info, cp.Spec.ETCDSnapshotRestore, clusterSecretTokens, plan, currentVersion); err != nil {
 		return status, err
 	}
 

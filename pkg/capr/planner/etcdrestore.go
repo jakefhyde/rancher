@@ -697,17 +697,8 @@ func (p *Planner) runEtcdRestoreServiceStop(controlPlane *rkev1.RKEControlPlane,
 }
 
 // retrieveEtcdSnapshot attempts to retrieve the etcdsnapshot CR that corresponds to the etcd snapshot restore name specified on the controlplane.
-func (p *Planner) retrieveEtcdSnapshot(controlPlane *rkev1.RKEControlPlane) (*rkev1.ETCDSnapshot, error) {
-	if controlPlane == nil {
-		return nil, fmt.Errorf("controlplane was nil")
-	}
-	if controlPlane.Spec.ETCDSnapshotRestore == nil {
-		return nil, fmt.Errorf("etcdsnapshotrestore spec was nil")
-	}
-	if controlPlane.Spec.ClusterName == "" {
-		return nil, fmt.Errorf("cluster name on rkecontrolplane %s/%s was blank", controlPlane.Namespace, controlPlane.Name)
-	}
-	snapshot, err := p.etcdSnapshotCache.Get(controlPlane.Namespace, controlPlane.Spec.ETCDSnapshotRestore.Name)
+func (p *Planner) retrieveEtcdSnapshot(input *rkev1.ETCDSnapshotRestore) (*rkev1.ETCDSnapshot, error) {
+	snapshot, err := p.etcdSnapshotCache.Get(controlPlane.Namespace, input.Name)
 	if apierrors.IsNotFound(err) {
 		return nil, nil
 	}
@@ -774,27 +765,27 @@ func (p *Planner) forceDeleteAllDeletingEtcdMachines(cp *rkev1.RKEControlPlane, 
 // Shutdown -> When the phase is shutdown, it attempts to shut down etcd on all nodes (stop etcd)
 // Restore ->  When the phase is restore, it attempts to restore etcd
 // Finished -> When the phase is finished, Restore returns nil.
-func (p *Planner) restoreEtcdSnapshot(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlaneStatus, tokensSecret plan.Secret, clusterPlan *plan.Plan, currentVersion *semver.Version) (rkev1.RKEControlPlaneStatus, error) {
-	if cp.Spec.ETCDSnapshotRestore == nil || cp.Spec.ETCDSnapshotRestore.Name == "" {
-		return p.resetEtcdSnapshotRestoreState(status)
-	}
+func (p *Planner) restoreEtcdSnapshot(info DistroInfo, input *rkev1.ETCDSnapshotRestore, status rkev1.RKEControlPlaneStatus, tokensSecret plan.Secret, clusterPlan *plan.Plan, currentVersion *semver.Version) (rkev1.ETCDSnapshotPhase, error) {
+	//if cp.Spec.ETCDSnapshotRestore == nil || cp.Spec.ETCDSnapshotRestore.Name == "" {
+	//	return p.resetEtcdSnapshotRestoreState(status)
+	//}
+	//
+	//if status, err := p.startOrRestartEtcdSnapshotRestore(status, cp.Spec.ETCDSnapshotRestore); err != nil {
+	//	return status, err
+	//}
 
-	if status, err := p.startOrRestartEtcdSnapshotRestore(status, cp.Spec.ETCDSnapshotRestore); err != nil {
-		return status, err
-	}
-
-	snapshot, err := p.retrieveEtcdSnapshot(cp)
+	snapshot, err := p.retrieveEtcdSnapshot(input)
 	if err != nil {
-		return status, err
+		return "", err
 	}
 
-	restoreModeRequiresClusterSpec := snapshotutil.RestoreModeRequiresClusterSpec(cp.Spec.ETCDSnapshotRestore)
+	restoreModeRequiresClusterSpec := snapshotutil.RestoreModeRequiresClusterSpec(input)
 
 	// validate the snapshot can be restored by checking to see if the snapshot version is < 1.25.x and the current version is 1.25 or newer.
 	if snapshot != nil {
 		clusterSpec, err := snapshotutil.ParseSnapshotClusterSpecOrError(snapshot)
 		if err != nil || clusterSpec == nil {
-			errorStr := fmt.Sprintf("[planner] rkecluster %s/%s: error parsing snapshot cluster spec for snapshot %s/%s during etcd restoration: %v", cp.Namespace, cp.Name, snapshot.Namespace, snapshot.Name, err)
+			errorStr := fmt.Sprintf("[planner] %s: error parsing snapshot cluster spec for snapshot %s/%s during etcd restoration: %v", info.DisplayName(), snapshot.Namespace, snapshot.Name, err)
 			if restoreModeRequiresClusterSpec {
 				logrus.Error(errorStr)
 			} else {
@@ -803,10 +794,10 @@ func (p *Planner) restoreEtcdSnapshot(cp *rkev1.RKEControlPlane, status rkev1.RK
 		} else {
 			snapshotK8sVersion, err := semver.NewVersion(clusterSpec.KubernetesVersion)
 			if err != nil {
-				return status, err
+				return "", err
 			}
 			if !currentVersion.LessThan(managesystemagent.Kubernetes125) && snapshotK8sVersion.LessThan(managesystemagent.Kubernetes125) {
-				return status, fmt.Errorf("unable to restore etcd snapshot -- recorded Kubernetes version on snapshot was <= v1.25.0 and current cluster version was v1.25.0 or newer")
+				return "", fmt.Errorf("unable to restore etcd snapshot -- recorded Kubernetes version on snapshot was <= v1.25.0 and current cluster version was v1.25.0 or newer")
 			}
 		}
 	}
@@ -817,8 +808,8 @@ func (p *Planner) restoreEtcdSnapshot(cp *rkev1.RKEControlPlane, status rkev1.RK
 			status.Initialization.ControlPlaneInitialized = ptr.To(false)
 			logrus.Debugf("[planner] rkecluster %s/%s: setting controlplane controlPlaneInitialized to false during etcd restore", cp.Namespace, cp.Name)
 		}
-		status, _ = p.setEtcdSnapshotRestoreState(status, cp.Spec.ETCDSnapshotRestore, rkev1.ETCDSnapshotPhaseShutdown)
-		return status, errWaitingf("shutting down cluster")
+		//return status, errWaitingf("shutting down cluster")
+		return rkev1.ETCDSnapshotPhaseShutdown, nil
 	case rkev1.ETCDSnapshotPhaseShutdown:
 		if err = p.runEtcdRestoreServiceStop(cp, snapshot, tokensSecret, clusterPlan); err != nil {
 			return status, err
@@ -827,7 +818,8 @@ func (p *Planner) restoreEtcdSnapshot(cp *rkev1.RKEControlPlane, status rkev1.RK
 		// the error returned from setEtcdSnapshotRestoreState is set based on etcd snapshot restore fields, but we are
 		// manipulating other fields so we should unconditionally return a waiting error.
 		status, _ = p.setEtcdSnapshotRestoreState(status, cp.Spec.ETCDSnapshotRestore, rkev1.ETCDSnapshotPhaseRestore)
-		return status, errWaiting("cluster shutdown complete, running etcd restore")
+		//return status, errWaiting("cluster shutdown complete, running etcd restore")
+		return rkev1.ETCDSnapshotPhaseRestore, nil
 	case rkev1.ETCDSnapshotPhaseRestore:
 		if err = p.runEtcdSnapshotRestorePlan(cp, snapshot, cp.Spec.ETCDSnapshotRestore.Name, tokensSecret, clusterPlan); err != nil {
 			return status, err
@@ -838,7 +830,7 @@ func (p *Planner) restoreEtcdSnapshot(cp *rkev1.RKEControlPlane, status rkev1.RK
 		if err = p.runEtcdSnapshotPostRestorePodCleanupPlan(cp, tokensSecret, clusterPlan); err != nil {
 			return status, err
 		}
-		return p.setEtcdSnapshotRestoreState(status, cp.Spec.ETCDSnapshotRestore, rkev1.ETCDSnapshotPhaseInitialRestartCluster)
+		return rkev1.ETCDSnapshotPhaseInitialRestartCluster, nil
 	case rkev1.ETCDSnapshotPhaseInitialRestartCluster:
 		if err := p.pauseCAPICluster(cp, false); err != nil {
 			return status, err

@@ -34,6 +34,8 @@ type DistroInfo struct {
 	AgentSystemdService  func() string
 
 	ProbesForEntry func(entry *planEntry) (map[string]plan.Probe, error)
+
+	DisplayName func() string
 }
 
 func NewCAPRDistroInfo(controlPlane *rkev1.RKEControlPlane) DistroInfo {
@@ -77,6 +79,9 @@ func NewCAPRDistroInfo(controlPlane *rkev1.RKEControlPlane) DistroInfo {
 			// todo(jhyde): remove planner dependency on config
 			return generateProbes(controlPlane, entry, nil)
 		},
+		DisplayName: func() string {
+			return fmt.Sprintf("rkecontrolplane.rke.cattle.io=%s/%s", controlPlane.Namespace, controlPlane.Name)
+		},
 	}
 }
 
@@ -108,7 +113,7 @@ func (p *Planner) generateInstallInstruction(info DistroInfo, entry *planEntry, 
 			Value: info.Version(),
 		}, true))
 	default:
-		env = append(env, fmt.Sprintf("%s_DATA_DIR=%s", strings.ToUpper(info.Runtime()), info.DataDirectory))
+		env = append(env, fmt.Sprintf("%s_DATA_DIR=%s", strings.ToUpper(info.Runtime()), info.DataDirectory()))
 	}
 
 	switch cattleOS {

@@ -248,10 +248,10 @@ func SecretToNode(secret *corev1.Secret) (*plan.Node, error) {
 
 	if len(output) > 0 {
 		gz, err := gzip.NewReader(bytes.NewBuffer(output))
-		defer gz.Close()
 		if err != nil {
 			return nil, err
 		}
+		defer gz.Close()
 		output, err = io.ReadAll(gz)
 		if err != nil {
 			return nil, err
@@ -268,6 +268,7 @@ func SecretToNode(secret *corev1.Secret) (*plan.Node, error) {
 		if err != nil {
 			return nil, err
 		}
+		defer gz.Close()
 		output, err = io.ReadAll(gz)
 		if err != nil {
 			return nil, err
