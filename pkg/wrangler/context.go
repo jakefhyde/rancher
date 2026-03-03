@@ -22,6 +22,7 @@ import (
 	clusterv3api "github.com/rancher/rancher/pkg/apis/cluster.cattle.io/v3"
 	extv1api "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	managementv3api "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	planv1alpha1api "github.com/rancher/rancher/pkg/apis/plan.cattle.io/v1alpha1"
 	projectv3api "github.com/rancher/rancher/pkg/apis/project.cattle.io/v3"
 	provisioningv1api "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	rkev1api "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
@@ -36,6 +37,8 @@ import (
 	fleetv1alpha1 "github.com/rancher/rancher/pkg/generated/controllers/fleet.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
 	managementv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	"github.com/rancher/rancher/pkg/generated/controllers/plan.cattle.io"
+	planv1alpha1 "github.com/rancher/rancher/pkg/generated/controllers/plan.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/generated/controllers/project.cattle.io"
 	projectv3 "github.com/rancher/rancher/pkg/generated/controllers/project.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
@@ -45,7 +48,7 @@ import (
 	"github.com/rancher/rancher/pkg/generated/controllers/telemetry.cattle.io"
 	telemetryv1 "github.com/rancher/rancher/pkg/generated/controllers/telemetry.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/generated/controllers/upgrade.cattle.io"
-	plancontrolers "github.com/rancher/rancher/pkg/generated/controllers/upgrade.cattle.io/v1"
+	upgradecontrollers "github.com/rancher/rancher/pkg/generated/controllers/upgrade.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/namespace"
 	"github.com/rancher/rancher/pkg/peermanager"
 	"github.com/rancher/rancher/pkg/settings"
@@ -104,6 +107,7 @@ var (
 		apiregistrationv12.AddToScheme,
 		catalogv1.AddToScheme,
 		extv1api.AddToScheme,
+		planv1alpha1api.AddToScheme,
 	}
 	AddToScheme = localSchemeBuilder.AddToScheme
 	Scheme      = runtime.NewScheme()
@@ -154,8 +158,9 @@ type Context struct {
 	API                 apiregv1.Interface
 	CRD                 crdv1.Interface
 	K8s                 *namespace.Clientset
-	Plan                plancontrolers.Interface
+	Upgrade             upgradecontrollers.Interface
 	Telemetry           telemetryv1.Interface
+	Plan                planv1alpha1.Interface
 
 	ASL                     accesscontrol.AccessSetLookup
 	ClientConfig            clientcmd.ClientConfig
@@ -183,8 +188,9 @@ type Context struct {
 	core         *namespace.WranglerFactory
 	api          *apiregistration.Factory
 	crd          *apiextensions.Factory
-	plan         *upgrade.Factory
+	upgrade      *upgrade.Factory
 	telemetry    *telemetry.Factory
+	plan         *plan.Factory
 
 	started bool
 }
@@ -345,7 +351,8 @@ func (w *Context) WithAgent(userAgent string) *Context {
 	wContextCopy.Core = wContextCopy.core.WithAgent(userAgent).V1()
 	wContextCopy.API = wContextCopy.api.WithAgent(userAgent).V1()
 	wContextCopy.CRD = wContextCopy.crd.WithAgent(userAgent).V1()
-	wContextCopy.Plan = wContextCopy.plan.WithAgent(userAgent).V1()
+	wContextCopy.Upgrade = wContextCopy.upgrade.WithAgent(userAgent).V1()
+	wContextCopy.Plan = wContextCopy.plan.WithAgent(userAgent).V1alpha1()
 
 	return &wContextCopy
 }
@@ -391,7 +398,7 @@ func NewContext(ctx context.Context, clientConfig clientcmd.ClientConfig, restCo
 		return nil, err
 	}
 
-	plan, err := upgrade.NewFactoryFromConfigWithOptions(restConfig, opts)
+	upgrade, err := upgrade.NewFactoryFromConfigWithOptions(restConfig, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -463,6 +470,11 @@ func NewContext(ctx context.Context, clientConfig clientcmd.ClientConfig, restCo
 	}
 
 	telemetry, err := telemetry.NewFactoryFromConfigWithOptions(restConfig, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	plan, err := plan.NewFactoryFromConfigWithOptions(restConfig, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -556,8 +568,9 @@ func NewContext(ctx context.Context, clientConfig clientcmd.ClientConfig, restCo
 		SystemChartsManager:     systemCharts,
 		TunnelAuthorizer:        tunnelAuth,
 		TunnelServer:            tunnelServer,
-		Plan:                    plan.Upgrade().V1(),
+		Upgrade:                 upgrade.Upgrade().V1(),
 		Telemetry:               telemetry.Telemetry().V1(),
+		Plan:                    plan.Plan().V1alpha1(),
 
 		mgmt:         mgmt,
 		apps:         apps,
@@ -572,8 +585,9 @@ func NewContext(ctx context.Context, clientConfig clientcmd.ClientConfig, restCo
 		crd:          crd,
 		rke:          rke,
 		rbac:         rbac,
-		plan:         plan,
+		upgrade:      upgrade,
 		telemetry:    telemetry,
+		plan:         plan,
 	}
 
 	wContext.DeferredCAPIRegistration = NewDeferredRegistration[*CAPIContext, *DeferredCAPIInitializer](wContext, NewCAPIInitializer(wContext), "deferred-capi")

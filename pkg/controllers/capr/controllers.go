@@ -12,6 +12,7 @@ import (
 	"github.com/rancher/rancher/pkg/controllers/capr/machinenodelookup"
 	"github.com/rancher/rancher/pkg/controllers/capr/machineprovision"
 	"github.com/rancher/rancher/pkg/controllers/capr/managesystemagent"
+	"github.com/rancher/rancher/pkg/controllers/capr/plan"
 	plannercontroller "github.com/rancher/rancher/pkg/controllers/capr/planner"
 	"github.com/rancher/rancher/pkg/controllers/capr/plansecret"
 	"github.com/rancher/rancher/pkg/controllers/capr/rkecluster"
@@ -36,7 +37,7 @@ func EarlyRegister(ctx context.Context, clients *wrangler.Context) error {
 }
 
 func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigManager *kubeconfig.Manager) error {
-	rkePlanner := planner.New(ctx, clients, planner.InfoFunctions{
+	rkePlanner := planner.New(ctx, clients, &planner.InfoFunctions{
 		ImageResolver:           image.ResolveWithControlPlane,
 		ReleaseData:             capr.GetKDMReleaseData,
 		SystemAgentImage:        settings.SystemAgentInstallerImage.Get,
@@ -56,6 +57,7 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigMana
 	rkecontrolplane.Register(ctx, clients)
 	managesystemagent.Register(ctx, clients)
 	machinedrain.Register(ctx, clients)
+	plan.Register(ctx, clients)
 
 	return nil
 }

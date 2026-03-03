@@ -98,7 +98,7 @@ func Register(ctx context.Context, clients *wrangler.Context, embedded bool, reg
 			"local",
 			clients.Provisioning.Cluster().Cache(),
 			clients.Catalog.App(),
-			clients.Plan.Plan(),
+			clients.Upgrade.Plan(),
 			clients.RKE.RKEControlPlane())
 	}
 

@@ -1,10 +1,7 @@
-package dayops
+package day2ops
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
-	"slices"
 
 	"github.com/rancher/lasso/pkg/dynamic"
 	planv1alpha1 "github.com/rancher/rancher/pkg/apis/plan.cattle.io/v1alpha1"
@@ -12,7 +9,6 @@ import (
 	"github.com/rancher/rancher/pkg/capr"
 	"github.com/rancher/wrangler/v3/pkg/data/convert"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -103,81 +99,6 @@ func (h *ETCDSnapshotCreateHandler) OnChange(e *ETCDSnapshotCreate) error {
 	return nil
 }
 
-type ClusterPlanHandler struct {
-	dynamic dynamic.Controller
-}
-
-func (h *ClusterPlanHandler) reconcileClusterPlan(clusterPlan *planv1alpha1.ClusterPlan) error {
-	b, err := json.Marshal(clusterPlan)
-	if err != nil {
-		return err
-	}
-	hash := sha256.Sum256(b)
-
-	// get current step
-	currentStep := clusterPlan.Status.CurrentStep
-	if len(clusterPlan.Spec.Plan) <= currentStep {
-		// error
-	}
-
-	npp := clusterPlan.Spec.Plan[currentStep]
-
-	sel, err := metav1.LabelSelectorAsSelector(&npp.Selector)
-	if err != nil {
-		return err
-	}
-
-	objs, err := h.dynamic.List(schema.FromAPIVersionAndKind("cluster.x-k8s.io/v1beta2", "Machine"), clusterPlan.Namespace, sel)
-	if err != nil {
-		return err
-	}
-
-	// sort machines by name
-	slices.SortFunc(objs, func(i, j runtime.Object) int {
-		i1, err := meta.Accessor(i)
-		if err != nil {
-			return 0
-		}
-		j1, err := meta.Accessor(j)
-		if err != nil {
-			return 0
-		}
-		if i1.GetName() < j1.GetName() {
-			return -1
-		} else if i1.GetName() > j1.GetName() {
-			return 1
-		}
-		return 0
-	})
-
-	// render plan for machines according to cluster plan
-	for _, o := range objs {
-		// todo(jhyde): go template node spec
-
-		m, err := NewMachineInfo(o)
-		if err != nil {
-			return err
-		}
-
-		_ = planv1alpha1.NodePlan{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace:   m.Namespace(),
-				Name:        m.PlanName(),
-				Annotations: map[string]string{},
-				Labels: map[string]string{
-					"plan.cattle.io/cluster-plan-hash": string(hash[:]),
-				},
-				OwnerReferences: []metav1.OwnerReference{},
-			},
-			Spec: npp.NodePlanSpec,
-		}
-
-		// assign plan, check concurrency
-	}
-
-	// reconcile machine
-	return nil
-}
 
 type MachineInfo struct {
 	Namespace func() string

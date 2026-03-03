@@ -171,7 +171,7 @@ func New(ctx context.Context, clients *wrangler.CAPIContext, functions *InfoFunc
 		etcdS3Args: s3Args{
 			secretCache: clients.Core.Secret().Cache(),
 		},
-		retrievalFunctions: functions,
+		retrievalFunctions: *functions,
 		equalities:         equalities,
 	}
 }
@@ -1048,7 +1048,7 @@ func (p *Planner) generatePlanWithConfigFiles(controlPlane *rkev1.RKEControlPlan
 		} else {
 			idempotentScriptFile = plan.File{
 				Content: base64.StdEncoding.EncodeToString([]byte(idempotentActionScript)),
-				Path:    idempotentActionScriptPath(controlPlane),
+				Path:    idempotentActionScriptPath(),
 				Dynamic: true,
 				Minor:   true,
 			}
@@ -1063,19 +1063,21 @@ func (p *Planner) generatePlanWithConfigFiles(controlPlane *rkev1.RKEControlPlan
 }
 
 func (p *Planner) desiredPlan(controlPlane *rkev1.RKEControlPlane, tokensSecret plan.Secret, entry *planEntry, joinServer string) (plan.NodePlan, string, error) {
-	nodePlan, config, joinedTo, err := p.generatePlanWithConfigFiles(controlPlane, tokensSecret, entry, joinServer, true)
+	nodePlan, _, joinedTo, err := p.generatePlanWithConfigFiles(controlPlane, tokensSecret, entry, joinServer, true)
 	if err != nil {
 		return nodePlan, joinedTo, err
 	}
 
-	probes, err := p.generateProbes(controlPlane, entry, config)
+	info := NewCAPRDistroInfo(controlPlane)
+
+	probes, err := info.ProbesForEntry(entry)
 	if err != nil {
 		return nodePlan, joinedTo, err
 	}
 	nodePlan.Probes = probes
 
 	// Add instruction last because it hashes config content
-	nodePlan, err = p.addInstallInstructionWithRestartStamp(nodePlan, controlPlane, entry)
+	nodePlan, err = p.addInstallInstructionWithRestartStamp(info, nodePlan, entry)
 	if err != nil {
 		return nodePlan, joinedTo, err
 	}
@@ -1083,7 +1085,7 @@ func (p *Planner) desiredPlan(controlPlane *rkev1.RKEControlPlane, tokensSecret 
 	if isInitNode(entry) && IsOnlyEtcd(entry) {
 		// If the annotation to disable autosetting the join URL is enabled, don't deliver a plan to add the periodic instruction to scrape init node.
 		if _, autosetDisabled := entry.Metadata.Annotations[capr.JoinURLAutosetDisabled]; !autosetDisabled {
-			nodePlan, err = p.addInitNodePeriodicInstruction(nodePlan, controlPlane)
+			nodePlan, err = p.addInitNodePeriodicInstruction(info, nodePlan)
 			if err != nil {
 				return nodePlan, joinedTo, err
 			}

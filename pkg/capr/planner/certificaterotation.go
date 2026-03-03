@@ -2,9 +2,7 @@ package planner
 
 import (
 	"fmt"
-	"path"
 	"strconv"
-	"strings"
 
 	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1/plan"
@@ -100,80 +98,80 @@ func (p *Planner) rotateCertificatesPlan(info DistroInfo, input *rkev1.RotateCer
 	if isControlPlane(entry) {
 		// The following kube-scheduler and kube-controller-manager certificates are self-signed by the respective services and are used by CAPR for secure healthz probes against the service.
 		if rotationContainsService(input, "controller-manager") {
-			if kcmCertDir := getArgValue(config[KubeControllerManagerArg], CertDirArgument, "="); kcmCertDir != "" && getArgValue(config[KubeControllerManagerArg], TLSCertFileArgument, "=") == "" {
-				rotatePlan.Instructions = append(rotatePlan.Instructions, []plan.OneTimeInstruction{
-					idempotentInstruction(
-						"certificate-rotation/rm-kcm-cert",
-						strconv.FormatInt(input.Generation, 10),
-						"rm",
-						[]string{
-							"-f",
-							fmt.Sprintf("%s/%s", kcmCertDir, DefaultKubeControllerManagerCert),
-						},
-						[]string{},
-					),
-					idempotentInstruction(
-						"certificate-rotation/rm-kcm-key",
-						strconv.FormatInt(input.Generation, 10),
-						"rm",
-						[]string{
-							"-f",
-							fmt.Sprintf("%s/%s", kcmCertDir, strings.ReplaceAll(DefaultKubeControllerManagerCert, ".crt", ".key")),
-						},
-						[]string{},
-					),
-				}...)
-				if runtime == capr.RuntimeRKE2 {
-					rotatePlan.Instructions = append(rotatePlan.Instructions, idempotentInstruction(
-						"certificate-rotation/rm-kcm-spm",
-						strconv.FormatInt(input.Generation, 10),
-						"rm",
-						[]string{
-							"-f",
-							path.Join(info.DataDirectory(), "/agent/pod-manifests/kube-controller-manager.yaml"),
-						},
-						[]string{},
-					))
-				}
-			}
+			//if kcmCertDir := getArgValue(config[KubeControllerManagerArg], CertDirArgument, "="); kcmCertDir != "" && getArgValue(config[KubeControllerManagerArg], TLSCertFileArgument, "=") == "" {
+			//	rotatePlan.Instructions = append(rotatePlan.Instructions, []plan.OneTimeInstruction{
+			//		idempotentInstruction(
+			//			"certificate-rotation/rm-kcm-cert",
+			//			strconv.FormatInt(input.Generation, 10),
+			//			"rm",
+			//			[]string{
+			//				"-f",
+			//				fmt.Sprintf("%s/%s", kcmCertDir, DefaultKubeControllerManagerCert),
+			//			},
+			//			[]string{},
+			//		),
+			//		idempotentInstruction(
+			//			"certificate-rotation/rm-kcm-key",
+			//			strconv.FormatInt(input.Generation, 10),
+			//			"rm",
+			//			[]string{
+			//				"-f",
+			//				fmt.Sprintf("%s/%s", kcmCertDir, strings.ReplaceAll(DefaultKubeControllerManagerCert, ".crt", ".key")),
+			//			},
+			//			[]string{},
+			//		),
+			//	}...)
+			//	if runtime == capr.RuntimeRKE2 {
+			//		rotatePlan.Instructions = append(rotatePlan.Instructions, idempotentInstruction(
+			//			"certificate-rotation/rm-kcm-spm",
+			//			strconv.FormatInt(input.Generation, 10),
+			//			"rm",
+			//			[]string{
+			//				"-f",
+			//				path.Join(info.DataDirectory(), "/agent/pod-manifests/kube-controller-manager.yaml"),
+			//			},
+			//			[]string{},
+			//		))
+			//	}
+			//}
 		}
 		if rotationContainsService(input, "scheduler") {
-			if ksCertDir := getArgValue(config[KubeSchedulerArg], CertDirArgument, "="); ksCertDir != "" && getArgValue(config[KubeSchedulerArg], TLSCertFileArgument, "=") == "" {
-				rotatePlan.Instructions = append(rotatePlan.Instructions, []plan.OneTimeInstruction{
-					idempotentInstruction(
-						"certificate-rotation/rm-ks-cert",
-						strconv.FormatInt(input.Generation, 10),
-						"rm",
-						[]string{
-							"-f",
-							fmt.Sprintf("%s/%s", ksCertDir, DefaultKubeSchedulerCert),
-						},
-						[]string{},
-					),
-					idempotentInstruction(
-						"certificate-rotation/rm-ks-key",
-						strconv.FormatInt(input.Generation, 10),
-						"rm",
-						[]string{
-							"-f",
-							fmt.Sprintf("%s/%s", ksCertDir, strings.ReplaceAll(DefaultKubeSchedulerCert, ".crt", ".key")),
-						},
-						[]string{},
-					),
-				}...)
-				if runtime == capr.RuntimeRKE2 {
-					rotatePlan.Instructions = append(rotatePlan.Instructions, idempotentInstruction(
-						"certificate-rotation/rm-ks-spm",
-						strconv.FormatInt(input.Generation, 10),
-						"rm",
-						[]string{
-							"-f",
-							path.Join(info.DataDirectory(), "agent/pod-manifests/kube-scheduler.yaml"),
-						},
-						[]string{},
-					))
-				}
-			}
+			//if ksCertDir := getArgValue(config[KubeSchedulerArg], CertDirArgument, "="); ksCertDir != "" && getArgValue(config[KubeSchedulerArg], TLSCertFileArgument, "=") == "" {
+			//	rotatePlan.Instructions = append(rotatePlan.Instructions, []plan.OneTimeInstruction{
+			//		idempotentInstruction(
+			//			"certificate-rotation/rm-ks-cert",
+			//			strconv.FormatInt(input.Generation, 10),
+			//			"rm",
+			//			[]string{
+			//				"-f",
+			//				fmt.Sprintf("%s/%s", ksCertDir, DefaultKubeSchedulerCert),
+			//			},
+			//			[]string{},
+			//		),
+			//		idempotentInstruction(
+			//			"certificate-rotation/rm-ks-key",
+			//			strconv.FormatInt(input.Generation, 10),
+			//			"rm",
+			//			[]string{
+			//				"-f",
+			//				fmt.Sprintf("%s/%s", ksCertDir, strings.ReplaceAll(DefaultKubeSchedulerCert, ".crt", ".key")),
+			//			},
+			//			[]string{},
+			//		),
+			//	}...)
+			//	if runtime == capr.RuntimeRKE2 {
+			//		rotatePlan.Instructions = append(rotatePlan.Instructions, idempotentInstruction(
+			//			"certificate-rotation/rm-ks-spm",
+			//			strconv.FormatInt(input.Generation, 10),
+			//			"rm",
+			//			[]string{
+			//				"-f",
+			//				path.Join(info.DataDirectory(), "agent/pod-manifests/kube-scheduler.yaml"),
+			//			},
+			//			[]string{},
+			//		))
+			//	}
+			//}
 		}
 	}
 	if runtime == capr.RuntimeRKE2 {

@@ -34,6 +34,8 @@ func RequiredCRDs() []string {
 
 	requiredCRDS = append(requiredCRDS, TelemetryCRDs()...)
 
+	requiredCRDS = append(requiredCRDS, PlanCRDs()...)
+
 	// get unique CRDs so they aren't registered twice
 	uniqueCRDs := make([]string, 0, len(requiredCRDS))
 	keys := map[string]struct{}{}
@@ -65,6 +67,13 @@ func BasicCRDs() []string {
 		"preferences.management.cattle.io",
 		"settings.management.cattle.io",
 		"proxyendpoints.management.cattle.io",
+	}
+}
+
+func PlanCRDs() []string {
+	return []string{
+		"clusterplans.plan.cattle.io",
+		"nodeplans.plan.cattle.io",
 	}
 }
 
@@ -279,4 +288,6 @@ var MigratedResources = map[string]bool{
 	"uiplugins.catalog.cattle.io":                                     true,
 	"workloads.project.cattle.io":                                     false,
 	"proxyendpoints.management.cattle.io":                             true,
+	"clusterplans.plan.cattle.io":                                     true,
+	"nodeplans.plan.cattle.io":                                        true,
 }

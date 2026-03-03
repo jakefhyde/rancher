@@ -8,7 +8,13 @@ type ClusterPlanSpec struct {
 
 type ClusterPlanStatus struct {
 	CurrentStep int
+	Phase       string
 }
+
+const ClusterPlanPhasePending = "Pending"
+const ClusterPlanPhaseRunning = "Running"
+const ClusterPlanPhaseSucceeded = "Succeeded"
+const ClusterPlanPhaseFailed = "Failed"
 
 // +genclient
 // +kubebuilder:resource:path=clusterplans,scope=Namespaced
@@ -30,6 +36,7 @@ type ClusterPlan struct {
 type NodePoolPlan struct {
 	// +optional
 	Selector     metav1.LabelSelector `json:"selector,omitempty"`
+	Concurrency  int                  `json:"concurrency,omitempty"`
 	NodePlanSpec `json:",inline"`
 }
 
@@ -119,5 +126,15 @@ type HTTPGetAction struct {
 	CACert     string `json:"caCert,omitempty"`
 }
 
+const ClusterPlanHashLabel = "plan.cattle.io/clusterplan-hash"
+
+const NodePlanPhasePending = "Pending"
+const NodePlanPhaseRunning = "Running"
+const NodePlanPhaseSucceeded = "Succeeded"
+const NodePlanPhaseFailed = "Failed"
+
 type NodePlanStatus struct {
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	Phase string `json:"phase,omitempty"`
 }
