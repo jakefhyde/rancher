@@ -1,0 +1,105 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: nodeplans.plan.cattle.io
+spec:
+  group: plan.cattle.io
+  names:
+    kind: NodePlan
+    listKind: NodePlanList
+    plural: nodeplans
+    singular: nodeplan
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: NodePlan is the Schema for the nodeplans API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              files:
+                items:
+                  properties:
+                    content:
+                      type: string
+                    path:
+                      type: string
+                    permissions:
+                      type: string
+                  type: object
+                type: array
+              instructions:
+                items:
+                  properties:
+                    args:
+                      items:
+                        type: string
+                      type: array
+                    command:
+                      type: string
+                    env:
+                      items:
+                        type: string
+                      type: array
+                    image:
+                      type: string
+                    name:
+                      type: string
+                    preserveStderr:
+                      type: boolean
+                    preserveStdout:
+                      type: boolean
+                    strategy:
+                      properties:
+                        failureThreshold:
+                          description: How many times an action can fail before marking
+                            the plan as failed
+                          type: integer
+                        periodSeconds:
+                          type: integer
+                        retryOnStartup:
+                          description: If a command should be executed when the agent
+                            is started
+                          type: boolean
+                        retryOnSuccess:
+                          description: If not idempotent, mark the whole plan as failed
+                            if agent exits before it finishes
+                          type: boolean
+                        successThreshold:
+                          description: How many times an action has to be run before
+                            being considered successful
+                          type: integer
+                        timeoutSeconds:
+                          type: integer
+                      type: object
+                  type: object
+                type: array
+            type: object
+          status:
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
