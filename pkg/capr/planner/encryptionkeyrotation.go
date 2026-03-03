@@ -1,13 +1,10 @@
 package planner
 
 import (
-	"encoding/base64"
 	"fmt"
-	"path"
 	"strconv"
 	"strings"
 
-	"github.com/pkg/errors"
 	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1/plan"
 	"github.com/rancher/rancher/pkg/capr"
@@ -15,73 +12,8 @@ import (
 )
 
 const (
-	encryptionKeyRotationStageReencryptFinished = "reencrypt_finished"
-
+	encryptionKeyRotationStageReencryptFinished      = "reencrypt_finished"
 	encryptionKeyRotationSecretsEncryptStatusCommand = "secrets-encrypt-status"
-
-	encryptionKeyRotationBinPrefix = "capr/encryption-key-rotation/bin"
-
-	encryptionKeyRotationWaitForSystemctlStatusPath      = "wait_for_systemctl_status.sh"
-	encryptionKeyRotationWaitForSecretsEncryptStatusPath = "wait_for_secrets_encrypt_status.sh"
-	encryptionKeyRotationSecretsEncryptStatusPath        = "secrets_encrypt_status.sh"
-
-	encryptionKeyRotationWaitForSystemctlStatus = `
-#!/bin/sh
-
-runtimeServer=$1
-i=0
-
-while [ $i -lt 30 ]; do
-	systemctl is-active $runtimeServer
-	if [ $? -eq 0 ]; then
-		exit 0
-	fi
-	sleep 10
-	i=$((i + 1))
-done
-exit 1
-`
-
-	encryptionKeyRotationWaitForSecretsEncryptStatusScript = `
-#!/bin/sh
-
-runtime=$1
-i=0
-
-while [ $i -lt 10 ]; do
-	$runtime secrets-encrypt status
-	if [ $? -eq 0 ]; then
-			exit 0
-	fi
-	sleep 10
-	i=$((i + 1))
-done
-exit 1
-`
-
-	encryptionKeyRotationSecretsEncryptStatusScript = `
-#!/bin/sh
-
-runtime=$1
-i=0
-
-while [ $i -lt 10 ]; do
-	output="$($runtime secrets-encrypt status)"
-	if [ $? -eq 0 ]; then
-		if [ -n "$2" ]; then
-			echo $output | grep -q "$2"
-				if [ $? -eq 0 ]; then
-					exit 0
-				fi
-		else
-			exit 0
-		fi
-	fi
-	sleep 10
-	i=$((i + 1))
-done
-exit 1
-`
 
 	encryptionKeyRotationEndpointEnv = "CONTAINER_RUNTIME_ENDPOINT=unix:///var/run/k3s/containerd/containerd.sock"
 )
@@ -184,11 +116,6 @@ func (p *Planner) encryptionKeyRotationRestartNodes(info DistroInfo, input *rkev
 func (p *Planner) encryptionKeyRotationRestartService(info DistroInfo, input *rkev1.RotateEncryptionKeys, entry *planEntry, scrapeStage bool, leaderStage string) (string, error) {
 	nodePlan := plan.NodePlan{}
 
-	nodePlan.Files = append(nodePlan.Files, plan.File{
-		Content: base64.StdEncoding.EncodeToString([]byte(encryptionKeyRotationWaitForSystemctlStatus)),
-		Path:    encryptionKeyRotationScriptPath(info, encryptionKeyRotationWaitForSystemctlStatusPath),
-	})
-
 	nodePlan.Instructions = []plan.OneTimeInstruction{}
 
 	runtime := info.Runtime()
@@ -209,16 +136,6 @@ func (p *Planner) encryptionKeyRotationRestartService(info DistroInfo, input *rk
 	nodePlan.Instructions = append(nodePlan.Instructions, encryptionKeyRotationWaitForSystemctlStatusInstruction(info, input))
 
 	if isControlPlane(entry) {
-		nodePlan.Files = append(nodePlan.Files,
-			plan.File{
-				Content: base64.StdEncoding.EncodeToString([]byte(encryptionKeyRotationSecretsEncryptStatusScript)),
-				Path:    encryptionKeyRotationScriptPath(info, encryptionKeyRotationSecretsEncryptStatusPath),
-			},
-			plan.File{
-				Content: base64.StdEncoding.EncodeToString([]byte(encryptionKeyRotationWaitForSecretsEncryptStatusScript)),
-				Path:    encryptionKeyRotationScriptPath(info, encryptionKeyRotationWaitForSecretsEncryptStatusPath),
-			},
-		)
 		nodePlan.Instructions = append(nodePlan.Instructions,
 			encryptionKeyRotationWaitForSecretsEncryptStatus(info, input),
 			encryptionKeyRotationSecretsEncryptStatusScriptOneTimeInstruction(info, input, leaderStage),
@@ -367,22 +284,13 @@ func encryptionKeyRotationGenerationEnv(input *rkev1.RotateEncryptionKeys) strin
 // encryptionKeyRotationSecretsEncryptStatusOneTimeInstruction generates a one-time instruction which will scrape the secrets-encrypt
 // status.
 func encryptionKeyRotationSecretsEncryptStatusScriptOneTimeInstruction(info DistroInfo, input *rkev1.RotateEncryptionKeys, expected string) plan.OneTimeInstruction {
-	i := plan.OneTimeInstruction{
+	return plan.OneTimeInstruction{
 		Name:    "secrets-encrypt-status-script",
-		Command: "sh",
-		Args: []string{
-			"-x",
-			encryptionKeyRotationScriptPath(info, encryptionKeyRotationSecretsEncryptStatusPath),
-			info.Runtime(),
-		},
+		Command: fmt.Sprintf(`%s secrets-encrypt status | grep -q "%s"`, info.Runtime(), expected),
 		Env: []string{
 			encryptionKeyRotationGenerationEnv(input),
 		},
 	}
-	if expected != "" {
-		i.Args = append(i.Args, expected)
-	}
-	return i
 }
 
 // encryptionKeyRotationSecretsEncryptStatusOneTimeInstruction generates a one time instruction which will scrape the secrets-encrypt
@@ -423,15 +331,18 @@ func encryptionKeyRotationSecretsEncryptStatusPeriodicInstruction(info DistroInf
 func encryptionKeyRotationWaitForSystemctlStatusInstruction(info DistroInfo, input *rkev1.RotateEncryptionKeys) plan.OneTimeInstruction {
 	return plan.OneTimeInstruction{
 		Name:    "wait-for-systemctl-status",
-		Command: "sh",
+		Command: "systemctl",
 		Args: []string{
-			"-x", encryptionKeyRotationScriptPath(info, encryptionKeyRotationWaitForSystemctlStatusPath), info.ServerSystemdService(),
+			"is-active",
+			info.ServerSystemdService(),
 		},
 		Env: []string{
 			encryptionKeyRotationEndpointEnv,
 			encryptionKeyRotationGenerationEnv(input),
 		},
-		SaveOutput: false,
+		SaveOutput:       false,
+		FailureThreshold: 30,
+		BackoffSeconds:   10,
 	}
 }
 
@@ -441,25 +352,17 @@ func encryptionKeyRotationWaitForSystemctlStatusInstruction(info DistroInfo, inp
 func encryptionKeyRotationWaitForSecretsEncryptStatus(info DistroInfo, input *rkev1.RotateEncryptionKeys) plan.OneTimeInstruction {
 	return plan.OneTimeInstruction{
 		Name:    "wait-for-secrets-encrypt-status",
-		Command: "sh",
+		Command: info.Runtime(),
 		Args: []string{
-			"-x", encryptionKeyRotationScriptPath(info, encryptionKeyRotationWaitForSecretsEncryptStatusPath), info.Runtime(),
+			"secrets-encrypt",
+			"status",
 		},
 		Env: []string{
 			encryptionKeyRotationEndpointEnv,
 			encryptionKeyRotationGenerationEnv(input),
 		},
-		SaveOutput: true,
+		SaveOutput:       true,
+		FailureThreshold: 10,
+		BackoffSeconds:   10,
 	}
-}
-
-// encryptionKeyRotationFailed updates the various status objects on the control plane, allowing the cluster to
-// continue the reconciliation loop. Encryption key rotation will not be restarted again until requested.
-func (p *Planner) encryptionKeyRotationFailed(status rkev1.RKEControlPlaneStatus, err error) (rkev1.RKEControlPlaneStatus, error) {
-	status.RotateEncryptionKeysPhase = rkev1.RotateEncryptionKeysPhaseFailed
-	return status, errors.Wrap(err, "encryption key rotation failed, please perform an etcd restore")
-}
-
-func encryptionKeyRotationScriptPath(info DistroInfo, file string) string {
-	return path.Join(info.DataDirectory(), encryptionKeyRotationBinPrefix, file)
 }

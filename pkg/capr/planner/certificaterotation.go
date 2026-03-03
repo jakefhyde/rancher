@@ -13,11 +13,6 @@ import (
 
 // rotateCertificates checks if there is a need to rotate any certificates and updates the plan accordingly.
 func (p *Planner) rotateCertificates(info DistroInfo, input *rkev1.RotateCertificates, clusterPlan *plan.Plan) error {
-	// todo(jhyde): make precondition
-	//if !shouldRotate(controlPlane) {
-	//	return status, nil
-	//}
-
 	// Assemble our list of nodes in order of etcd-only, etcd with controlplane, controlplane-only, and everything else
 	orderedEntriesToRotate := collectOrderedCertificateRotationEntries(clusterPlan)
 
@@ -57,23 +52,6 @@ func collectOrderedCertificateRotationEntries(clusterPlan *plan.Plan) []*planEnt
 	orderedEntriesToRotate = append(orderedEntriesToRotate, collect(clusterPlan, isOnlyWorker)...)                    // worker
 	return orderedEntriesToRotate
 }
-
-//// shouldRotate `true` if the cluster is ready and the generation is stale
-//func shouldRotate(cp *rkev1.RKEControlPlane) bool {
-//	// if a spec is not defined there is nothing to do
-//	if cp.Spec.RotateCertificates == nil {
-//		return false
-//	}
-//
-//	// The controlplane must be initialized before we rotate anything
-//	if !ptr.Deref(cp.Status.Initialization.ControlPlaneInitialized, false) {
-//		logrus.Warnf("[planner] rkecluster %s/%s: skipping certificate rotation as cluster was not initialized", cp.Namespace, cp.Name)
-//		return false
-//	}
-//
-//	// if this generation has already been applied there is no work
-//	return cp.Status.CertificateRotationGeneration != cp.Spec.RotateCertificates.Generation
-//}
 
 // rotateCertificatesPlan rotates the certificates for the services specified, if any, and restarts the service.  If no services are specified
 // all certificates are rotated.
@@ -152,7 +130,7 @@ func (p *Planner) rotateCertificatesPlan(info DistroInfo, input *rkev1.RotateCer
 						"rm",
 						[]string{
 							"-f",
-							path.Join(capr.GetDistroDataDir(controlPlane), "/agent/pod-manifests/kube-controller-manager.yaml"),
+							path.Join(info.DataDirectory(), "/agent/pod-manifests/kube-controller-manager.yaml"),
 						},
 						[]string{},
 					))
@@ -190,7 +168,7 @@ func (p *Planner) rotateCertificatesPlan(info DistroInfo, input *rkev1.RotateCer
 						"rm",
 						[]string{
 							"-f",
-							path.Join(capr.GetDistroDataDir(controlPlane), "agent/pod-manifests/kube-scheduler.yaml"),
+							path.Join(info.DataDirectory(), "agent/pod-manifests/kube-scheduler.yaml"),
 						},
 						[]string{},
 					))
@@ -209,7 +187,7 @@ func (p *Planner) rotateCertificatesPlan(info DistroInfo, input *rkev1.RotateCer
 	rotatePlan.Instructions = append(rotatePlan.Instructions, idempotentRestartInstructions(
 		"certificate-rotation/restart",
 		strconv.FormatInt(input.Generation, 10),
-		capr.GetRuntimeServerUnit(controlPlane.Spec.KubernetesVersion))...)
+		info.ServerSystemdService())...)
 	return rotatePlan, nil
 }
 

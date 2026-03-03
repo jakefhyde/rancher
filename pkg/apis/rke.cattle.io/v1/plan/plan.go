@@ -51,12 +51,15 @@ type Secret struct {
 }
 
 type OneTimeInstruction struct {
-	Name       string   `json:"name,omitempty"`
-	Image      string   `json:"image,omitempty"`
-	Env        []string `json:"env,omitempty"`
-	Args       []string `json:"args,omitempty"`
-	Command    string   `json:"command,omitempty"`
-	SaveOutput bool     `json:"saveOutput,omitempty"`
+	Name             string   `json:"name,omitempty"`
+	Image            string   `json:"image,omitempty"`
+	Env              []string `json:"env,omitempty"`
+	Args             []string `json:"args,omitempty"`
+	Command          string   `json:"command,omitempty"`
+	SaveOutput       bool     `json:"saveOutput,omitempty"`
+	BackoffSeconds   int      `json:"backoffSeconds,omitempty"`
+	SuccessThreshold int      `json:"successThreshold,omitempty"`
+	FailureThreshold int      `json:"failureThreshold,omitempty"`
 }
 
 type PeriodicInstruction struct {

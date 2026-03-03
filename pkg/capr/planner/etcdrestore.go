@@ -18,7 +18,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/utils/ptr"
 	capi "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
@@ -765,7 +764,7 @@ func (p *Planner) forceDeleteAllDeletingEtcdMachines(cp *rkev1.RKEControlPlane, 
 // Shutdown -> When the phase is shutdown, it attempts to shut down etcd on all nodes (stop etcd)
 // Restore ->  When the phase is restore, it attempts to restore etcd
 // Finished -> When the phase is finished, Restore returns nil.
-func (p *Planner) restoreEtcdSnapshot(info DistroInfo, input *rkev1.ETCDSnapshotRestore, status rkev1.RKEControlPlaneStatus, tokensSecret plan.Secret, clusterPlan *plan.Plan, currentVersion *semver.Version) (rkev1.ETCDSnapshotPhase, error) {
+func (p *Planner) restoreEtcdSnapshot(info DistroInfo, input *rkev1.ETCDSnapshotRestore, phase rkev1.ETCDSnapshotPhase, tokensSecret plan.Secret, clusterPlan *plan.Plan) (rkev1.ETCDSnapshotPhase, error) {
 	//if cp.Spec.ETCDSnapshotRestore == nil || cp.Spec.ETCDSnapshotRestore.Name == "" {
 	//	return p.resetEtcdSnapshotRestoreState(status)
 	//}
@@ -804,11 +803,11 @@ func (p *Planner) restoreEtcdSnapshot(info DistroInfo, input *rkev1.ETCDSnapshot
 
 	switch cp.Status.ETCDSnapshotRestorePhase {
 	case rkev1.ETCDSnapshotPhaseStarted:
-		if ptr.Deref(status.Initialization.ControlPlaneInitialized, false) {
-			status.Initialization.ControlPlaneInitialized = ptr.To(false)
-			logrus.Debugf("[planner] rkecluster %s/%s: setting controlplane controlPlaneInitialized to false during etcd restore", cp.Namespace, cp.Name)
-		}
-		//return status, errWaitingf("shutting down cluster")
+		//if ptr.Deref(status.Initialization.ControlPlaneInitialized, false) {
+		//	status.Initialization.ControlPlaneInitialized = ptr.To(false)
+		//	logrus.Debugf("[planner] rkecluster %s/%s: setting controlplane controlPlaneInitialized to false during etcd restore", cp.Namespace, cp.Name)
+		//}
+		////return status, errWaitingf("shutting down cluster")
 		return rkev1.ETCDSnapshotPhaseShutdown, nil
 	case rkev1.ETCDSnapshotPhaseShutdown:
 		if err = p.runEtcdRestoreServiceStop(cp, snapshot, tokensSecret, clusterPlan); err != nil {

@@ -1,0 +1,67 @@
+apiVersion: agent.cattle.io/v1
+kind: ClusterPlan
+metadata:
+  annotations:
+    a: b
+  labels:
+    a: b
+  namespace: fleet-default
+  name: jhyde-test-etcd-restore
+spec:
+  nodePlan:
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/os
+            operator: NotIn
+            values: [ "windows" ]
+      commands:
+        - name: 'Stop RKE2'
+          command: 'rke2-killall.sh' # test if exists first
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/etcd-role
+            operator: In
+            values: [ "true" ]
+      commands:
+        - name: 'Create tombstone'
+          command: 'touch /var/lib/rancher/rke2/server/db/etcd/tombstone'
+        - name: 'Remove tls directory'
+          command: 'touch /var/lib/rancher/rke2/server/tls'
+        - name: 'Remove cred directory'
+          command: 'touch /var/lib/rancher/rke2/server/cred'
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/control-plane-role
+            operator: In
+            values: [ "true" ]
+      commands:
+        - name: 'Remove tls directory'
+          command: 'touch /var/lib/rancher/rke2/server/tls'
+        - name: 'Remove cred directory'
+          command: 'touch /var/lib/rancher/rke2/server/cred'
+        - name: 'Remove manifests'
+          command: 'rm -rf /var/lib/rancher/rke2/server/manifests'
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/bootstrap-role
+            operator: In
+            values: [ "true" ]
+      commands:
+        - name: 'Remove tls directory'
+          command: 'touch /var/lib/rancher/rke2/server/tls'
+    # elect leader and pause CAPI cluster?
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/bootstrap-role
+            operator: In
+            values: [ "true" ]
+      commands:
+        - name: 'Remove etcd directory'
+          command: 'rm -rf /var/lib/rancher/rke2/server/db/etcd'
+        - name: 'Reset cluster'
+          command: 'rke2 server --cluster-reset --cluster-reset-restore-path=db/snapshots' # s3 also
+    # todo: runEtcdSnapshotPostRestorePodCleanupPlan
+    # todo: unpause CAPI cluster and run full reconcile
+    # todo: runEtcdSnapshotPostRestoreNodeCleanupPlan
+    # todo: run another full reconcile
+status:

@@ -2,16 +2,57 @@ package v1alpha1
 
 import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+type ClusterPlanSpec struct {
+	Plan []NodePoolPlan `json:"plan,omitempty"`
+}
+
+type ClusterPlanStatus struct {
+	CurrentStep int
+}
+
+// +genclient
+// +kubebuilder:resource:path=clusterplans,scope=Namespaced
+// +kubebuilder:subresource:status
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// ClusterPlan is the Schema for the clusterplans API
+type ClusterPlan struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	// +optional
+	Spec ClusterPlanSpec `json:"spec,omitempty"`
+
+	// +optional
+	Status ClusterPlanStatus `json:"status,omitempty"`
+}
+
+type NodePoolPlan struct {
+	// +optional
+	Selector     metav1.LabelSelector `json:"selector,omitempty"`
+	NodePlanSpec `json:",inline"`
+}
+
+// +genclient
+// +kubebuilder:resource:path=nodeplans,scope=Namespaced
+// +kubebuilder:subresource:status
+// +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
+
+// NodePlan is the Schema for the nodeplans API
 type NodePlan struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   NodePlanSpec   `json:"spec,omitempty"`
+	// +optional
+	Spec NodePlanSpec `json:"spec,omitempty"`
+
+	// +optional
 	Status NodePlanStatus `json:"status,omitempty"`
 }
 
 type NodePlanSpec struct {
-	Files []File `json:"files,omitempty"`
+	Files        []File        `json:"files,omitempty"`
+	Instructions []Instruction `json:"instructions,omitempty"`
 }
 
 type File struct {

@@ -1,0 +1,35 @@
+apiVersion: agent.cattle.io/v1
+kind: ClusterPlan
+metadata:
+  annotations:
+    a: b
+  labels:
+    a: b
+  namespace: fleet-default
+  name: jhyde-test-encryption-key-rotation
+spec:
+  nodePlan:
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/control-plane-leader
+            operator: In
+            values: [ "true" ]
+      commands:
+        - name: 'Rotate keys'
+          command: 'rke2 secrets-encrypt rotate-keys'
+        - name: 'Validate status'
+          command: 'rke2 secrets-encrypt status' # need to parse json to get stage as reencrypt_finished
+        - name: 'Restart service'
+          command: 'systemctl restart rke2-server.service'
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/control-plane
+            operator: In
+            values: [ "true" ]
+          - key: agent.cattle.io/control-plane-leader
+            operator: NotIn
+            values: [ "true" ]
+      commands:
+        - name: 'Restart service'
+          command: 'systemctl restart rke2-server.service'
+status:

@@ -22,7 +22,6 @@ import (
 	"github.com/rancher/rancher/pkg/capr"
 	capicontrollers "github.com/rancher/rancher/pkg/generated/controllers/cluster.x-k8s.io/v1beta2"
 	mgmtcontrollers "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
-	ranchercontrollers "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io/v1"
 	rkecontrollers "github.com/rancher/rancher/pkg/generated/controllers/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/wrangler"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
@@ -123,7 +122,6 @@ type Planner struct {
 	capiClient                    capicontrollers.ClusterClient
 	capiClusters                  capicontrollers.ClusterCache
 	managementClusters            mgmtcontrollers.ClusterCache
-	rancherClusterCache           ranchercontrollers.ClusterCache
 	locker                        locker.Locker
 	etcdS3Args                    s3Args
 	retrievalFunctions            InfoFunctions
@@ -145,7 +143,7 @@ type InfoFunctions struct {
 	GetBootstrapManifests   func(plane *rkev1.RKEControlPlane) ([]plan.File, error)
 }
 
-func New(ctx context.Context, clients *wrangler.CAPIContext, functions InfoFunctions) *Planner {
+func New(ctx context.Context, clients *wrangler.CAPIContext, functions *InfoFunctions) *Planner {
 	clients.Mgmt.ClusterRegistrationToken().Cache().AddIndexer(ClusterRegToken, func(obj *v3.ClusterRegistrationToken) ([]string, error) {
 		return []string{obj.Spec.ClusterName}, nil
 	})
@@ -166,7 +164,6 @@ func New(ctx context.Context, clients *wrangler.CAPIContext, functions InfoFunct
 		capiClient:                    clients.CAPI.Cluster(),
 		capiClusters:                  clients.CAPI.Cluster().Cache(),
 		managementClusters:            clients.Mgmt.Cluster().Cache(),
-		rancherClusterCache:           clients.Provisioning.Cluster().Cache(),
 		rkeControlPlanes:              clients.RKE.RKEControlPlane(),
 		rkeBootstrap:                  clients.RKE.RKEBootstrap(),
 		rkeBootstrapCache:             clients.RKE.RKEBootstrap().Cache(),
@@ -237,11 +234,6 @@ func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlan
 		logrus.Debugf("[planner] rkecluster %s/%s: unlocking %s", namespace, name, uid)
 		_ = p.locker.Unlock(uid)
 	}(cp.Namespace, cp.Name, string(cp.UID))
-
-	currentVersion, err := semver.NewVersion(cp.Spec.KubernetesVersion)
-	if err != nil {
-		return status, fmt.Errorf("rkecluster %s/%s: error semver parsing kubernetes version %s: %v", cp.Namespace, cp.Name, cp.Spec.KubernetesVersion, err)
-	}
 
 	releaseData := p.retrievalFunctions.ReleaseData(p.ctx, cp)
 	if releaseData == nil {
@@ -323,43 +315,7 @@ func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlan
 		return status, err
 	}
 
-	info := NewCAPRDistroInfo(cp)
-
-	if cp.Spec.ETCDSnapshotCreate != nil && cp.Spec.ETCDSnapshotCreate != status.ETCDSnapshotCreate {
-		if phase, err := p.createEtcdSnapshot(info, cp.Spec.ETCDSnapshotCreate, status.ETCDSnapshotCreatePhase, plan); err != nil {
-			return status, err
-		} else if phase != "" {
-			status.ETCDSnapshotCreatePhase = phase
-			return status, errWaiting("refreshing etcd create state")
-		}
-		status.ETCDSnapshotCreate = cp.Spec.ETCDSnapshotCreate
-		status.ETCDSnapshotCreatePhase = ""
-		return status, errWaiting("refreshing etcd create state")
-	}
-
-	if status, err = p.restoreEtcdSnapshot(info, cp.Spec.ETCDSnapshotRestore, clusterSecretTokens, plan, currentVersion); err != nil {
-		return status, err
-	}
-
-	if cp.Spec.RotateCertificates != nil && cp.Spec.RotateCertificates.Generation != status.CertificateRotationGeneration {
-		if err := p.rotateCertificates(info, cp.Spec.RotateCertificates, plan); err != nil {
-			return status, err
-		}
-		status.CertificateRotationGeneration = cp.Spec.RotateCertificates.Generation
-		return status, errWaiting("refreshing encryption key rotation state")
-	}
-
-	if cp.Spec.RotateEncryptionKeys != nil && cp.Spec.RotateEncryptionKeys != status.RotateEncryptionKeys {
-		if phase, err := p.rotateEncryptionKeys(info, cp.Spec.RotateEncryptionKeys, status.RotateEncryptionKeysPhase, plan, nil, nil); err != nil {
-			return status, err
-		} else if phase != "" {
-			status.RotateEncryptionKeysPhase = phase
-			return status, errWaiting("refreshing encryption key rotation state")
-		}
-		status.RotateEncryptionKeys = cp.Spec.RotateEncryptionKeys
-		status.RotateEncryptionKeysPhase = ""
-		return status, errWaiting("refreshing encryption key rotation state")
-	}
+	// todo(jhyde): check if op in progress
 
 	// pausing the control plane only affects machine reconciliation: etcd snapshot/restore, encryption key & cert
 	// rotation are not interruptable processes, and therefore must always be completed when requested
@@ -462,28 +418,6 @@ func (p *Planner) fullReconcile(cp *rkev1.RKEControlPlane, status rkev1.RKEContr
 		return status, errWaiting(firstIgnoreError.Error())
 	}
 	return status, nil
-}
-
-// getLowestMachineK8sVersion determines the lowest kubelet version in the plan
-func getLowestMachineKubeletVersion(plan *plan.Plan) *semver.Version {
-	var lowestVersion *semver.Version
-	for _, machine := range plan.Machines {
-		if machine.Status.NodeInfo != nil {
-			ver, err := semver.NewVersion(machine.Status.NodeInfo.KubeletVersion)
-			if err != nil {
-				logrus.Errorf("error while parsing node kubelet version (%s): %v", machine.Status.NodeInfo.KubeletVersion, err)
-				continue
-			}
-			if lowestVersion == nil {
-				lowestVersion = ver
-			} else {
-				if ver.LessThan(lowestVersion) {
-					lowestVersion = ver
-				}
-			}
-		}
-	}
-	return lowestVersion
 }
 
 // clusterIsSane ensures that there is at least one controlplane, etcd, and worker node that are not deleting for the cluster.

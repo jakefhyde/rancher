@@ -1,0 +1,39 @@
+apiVersion: agent.cattle.io/v1
+kind: ClusterPlan
+metadata:
+  annotations:
+    a: b
+  labels:
+    a: b
+  namespace: fleet-default
+  name: jhyde-test-snapshot-create
+spec:
+  nodePlan:
+    - selector:
+        matchExpressions:
+          - key: agent.cattle.io/etcd-role
+            operator: In
+            values: [ "true" ]
+      commands:
+        - name: 'Create snapshot'
+          command: 'rke2 etcd-snapshot save'
+#    - selector:
+#        matchExpressions:
+#          - key: agent.cattle.io/bootstrap-role
+#            operator: In
+#            values: [ "true" ]
+#      commands:
+#        - name: 'Restart service'
+#          command: 'systemctl restart rke2-server.service'
+#    - selector:
+#        matchExpressions:
+#          - key: agent.cattle.io/bootstrap-role
+#            operator: NotIn
+#            values: [ "true" ]
+#          - key: agent.cattle.io/etcd-role
+#            operator: In
+#            values: [ "true" ]
+#      commands:
+#        - name: 'Restart service'
+#          command: 'systemctl restart rke2-server.service'
+status:
