@@ -7,8 +7,8 @@ type ClusterPlanSpec struct {
 }
 
 type ClusterPlanStatus struct {
-	CurrentStep int
-	Phase       string
+	CurrentStep int    `json:"currentStep,omitempty"`
+	Phase       string `json:"phase,omitempty"`
 }
 
 const ClusterPlanPhasePending = "Pending"

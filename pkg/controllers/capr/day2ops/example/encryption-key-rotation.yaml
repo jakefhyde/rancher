@@ -1,10 +1,6 @@
 apiVersion: agent.cattle.io/v1
 kind: ClusterPlan
 metadata:
-  annotations:
-    a: b
-  labels:
-    a: b
   namespace: fleet-default
   name: jhyde-test-encryption-key-rotation
 spec:

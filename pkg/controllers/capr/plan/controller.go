@@ -3,9 +3,11 @@ package plan
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/json"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/rancher/lasso/pkg/dynamic"
 	planv1alpha1 "github.com/rancher/rancher/pkg/apis/plan.cattle.io/v1alpha1"
@@ -13,6 +15,7 @@ import (
 	"github.com/rancher/rancher/pkg/wrangler"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/name"
+	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -49,12 +52,29 @@ func (h *handler) OnClusterPlanChange(_ string, plan *planv1alpha1.ClusterPlan) 
 	if plan == nil {
 		return nil, nil
 	}
+	defer func() {
+		logrus.Debugf("[clusterplan] requeue cluster plan %s/%s", plan.Namespace, plan.Name)
+		h.clusterPlan.EnqueueAfter(plan.Namespace, plan.Name, 5*time.Second)
+	}()
+
+	if plan.Status.Phase == planv1alpha1.ClusterPlanPhaseSucceeded {
+		logrus.Debugf("[clusterplan] skipping processing for successful clusterplan %s/%s", plan.Namespace, plan.Name)
+		return plan, nil
+	} else if plan.Status.Phase == planv1alpha1.ClusterPlanPhaseFailed {
+		logrus.Debugf("[clusterplan] skipping processing for failed clusterplan %s/%s", plan.Namespace, plan.Name)
+		return plan, nil
+	}
+
+	logrus.Debugf("[clusterplan] processing clusterplan %s/%s", plan.Namespace, plan.Name)
 
 	b, err := json.Marshal(plan)
 	if err != nil {
 		return nil, err
 	}
-	hash := sha256.Sum256(b)
+	rawHash := sha256.Sum256(b)
+	hash := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(rawHash[:])
+
+	logrus.Debugf("[clusterplan] processing clusterplan %s/%s with hash %s", plan.Namespace, plan.Name, hash)
 
 	// get the current step
 	currentStep := plan.Status.CurrentStep
@@ -99,12 +119,20 @@ func (h *handler) OnClusterPlanChange(_ string, plan *planv1alpha1.ClusterPlan) 
 		concurrency = len(objs)
 	}
 
+	logrus.Debugf("[clusterplan] processing %d machines out of %d", concurrency, len(objs))
+
+	if concurrency == 0 {
+		logrus.Debugf("[clusterplan] skipping step for clusterplan %s/%s as no machines match selector", plan.Namespace, plan.Name)
+	}
+
 	// render plan for machines according to the cluster plan
 	for _, o := range objs {
 		if concurrency <= 0 {
+			logrus.Debugf("[clusterplan] halthing processing for clusterplan %s/%s due to concurrency limit", plan.Namespace, plan.Name)
 			// hit concurrency limit
 			break
 		}
+
 		// todo(jhyde): go template node spec
 
 		m, err := NewMachineInfo(o)
@@ -112,29 +140,37 @@ func (h *handler) OnClusterPlanChange(_ string, plan *planv1alpha1.ClusterPlan) 
 			return nil, err
 		}
 
+		logrus.Debugf("[clusterplan] rendering nodeplan %s/%s for clusterplan %s/%s", m.Namespace(), m.PlanName(), plan.Namespace, plan.Name)
+
 		np, err := h.nodePlanCache.Get(m.Namespace(), m.PlanName())
 		if apierrors.IsNotFound(err) {
 			// create
-			_ = planv1alpha1.NodePlan{
+			np = &planv1alpha1.NodePlan{
 				ObjectMeta: metav1.ObjectMeta{
 					Namespace:   m.Namespace(),
 					Name:        m.PlanName(),
 					Annotations: map[string]string{},
 					Labels: map[string]string{
-						planv1alpha1.ClusterPlanHashLabel: string(hash[:]),
+						planv1alpha1.ClusterPlanHashLabel: hash,
 					},
 					OwnerReferences: []metav1.OwnerReference{},
 				},
 				Spec: npp.NodePlanSpec,
+			}
+			logrus.Debugf("[clusterplan] creating nodeplan %s/%s", m.Namespace(), m.PlanName())
+			_, err = h.nodePlan.Create(np)
+			if err != nil {
+				return nil, err
 			}
 			concurrency--
 			continue
 		} else if err != nil {
 			return nil, err
 		}
-		if np.Labels != nil && np.Labels[planv1alpha1.ClusterPlanHashLabel] == string(hash[:]) {
+		if np.Labels != nil && np.Labels[planv1alpha1.ClusterPlanHashLabel] == hash {
 			// check if plan in sync
 			if np.Status.Phase == planv1alpha1.NodePlanPhaseFailed {
+				logrus.Debugf("[clusterplan] marking plan %s/%s failed due to failed nodeplan %s/%s", plan.Namespace, plan.Name, m.Namespace(), m.PlanName())
 				// update clusterplan
 				plan = plan.DeepCopy()
 				plan.Status.Phase = planv1alpha1.ClusterPlanPhaseFailed
@@ -151,8 +187,9 @@ func (h *handler) OnClusterPlanChange(_ string, plan *planv1alpha1.ClusterPlan) 
 
 		// either delete or update
 
+		logrus.Debugf("[clusterplan] deleting nodeplan %s/%s", m.Namespace(), m.PlanName())
 		// assign plan, check concurrency
-		err = h.clusterPlan.Delete(m.Namespace(), m.PlanName(), &metav1.DeleteOptions{})
+		err = h.nodePlan.Delete(m.Namespace(), m.PlanName(), &metav1.DeleteOptions{})
 		if err != nil {
 			return nil, err
 		}
@@ -160,21 +197,22 @@ func (h *handler) OnClusterPlanChange(_ string, plan *planv1alpha1.ClusterPlan) 
 	}
 
 	if concurrency != len(objs) {
+		logrus.Debugf("[clusterplan] marking clusterplan %s/%s as running", plan.Namespace, plan.Name)
 		plan = plan.DeepCopy()
 		// update conditions
 		plan.Status.Phase = planv1alpha1.ClusterPlanPhaseRunning
 		return h.clusterPlan.UpdateStatus(plan)
 	}
 
+	logrus.Debugf("[clusterplan] advancing current step for clusterplan %s/%s", plan.Namespace, plan.Name)
 	// all plans in sync
 	plan = plan.DeepCopy()
 	plan.Status.CurrentStep++
 	if len(plan.Spec.Plan) <= plan.Status.CurrentStep {
+		logrus.Debugf("[clusterplan] marking clusterplan %s/%s as successful", plan.Namespace, plan.Name)
 		plan.Status.Phase = planv1alpha1.ClusterPlanPhaseSucceeded
-		return h.clusterPlan.UpdateStatus(plan)
 	}
-
-	return plan, nil
+	return h.clusterPlan.UpdateStatus(plan)
 }
 
 func (h *handler) OnNodePlanChange(_ string, plan *planv1alpha1.NodePlan) (*planv1alpha1.NodePlan, error) {
@@ -188,10 +226,14 @@ func (h *handler) OnNodePlanChange(_ string, plan *planv1alpha1.NodePlan) (*plan
 		return nil, err
 	}
 
+
 	b, err := json.Marshal(plan.Spec)
 	if err != nil {
 		return nil, err
 	}
+
+	// todo(jhyde): apply checksum
+
 	mps = mps.DeepCopy()
 	mps.Data["plan"] = b
 

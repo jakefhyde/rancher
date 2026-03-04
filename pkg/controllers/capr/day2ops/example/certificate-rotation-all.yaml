@@ -1,130 +1,158 @@
-apiVersion: agent.cattle.io/v1
+apiVersion: plan.cattle.io/v1alpha1
 kind: ClusterPlan
 metadata:
-  annotations:
-    a: b
-  labels:
-    a: b
   namespace: fleet-default
-  name: jhyde-test-certificate-rotation-all
+  name: jhyde-rke2-test-cluster-plan
 spec:
-  nodePlan:
+  plan:
     - selector:
         matchExpressions:
-          - key: agent.cattle.io/etcd-role
+          - key: rke.cattle.io/etcd-role
             operator: In
             values: [ "true" ]
-          - key: agent.cattle.io/controlplane-role
+          - key: rke.cattle.io/control-plane-role
             operator: NotIn
             values: [ "true" ]
-          - key: agent.cattle.io/worker-role
+          - key: rke.cattle.io/worker-role
             operator: NotIn
             values: [ "true" ]
-      commands:
+      instructions:
         - name: 'Stop service'
-          command: 'systemctl stop rke2-server.service'
+          command: systemctl
+          args: [ "stop", "rke2-server.service" ]
         - name: 'Rotate certificates'
-          command: 'rke2 certificate rotate'
+          command: rke2
+          args: [ "certificate", "rotate" ]
         - name: 'Remove manifests'
-          command: 'rm -rf /var/lib/rancher/rke2/server/manifests-*.yaml'
+        #          command: 'rm -rf /var/lib/rancher/rke2/server/manifests-*.yaml'
         - name: 'Restart service'
-          command: 'systemctl restart rke2-server.service'
+          command: systemctl
+          args: [ "restart", "rke2-server.service" ]
     - selector:
         matchExpressions:
-          - key: agent.cattle.io/etcd-role
+          - key: rke.cattle.io/etcd-role
             operator: In
             values: [ "true" ]
-          - key: agent.cattle.io/controlplane-role
+          - key: rke.cattle.io/control-plane-role
             operator: In
             values: [ "true" ]
-          - key: agent.cattle.io/worker-role
+          - key: rke.cattle.io/worker-role
             operator: NotIn
             values: [ "true" ]
-      commands:
+      instructions:
         - name: 'Stop service'
-          command: 'systemctl stop rke2-server.service'
+          command: systemctl
+          args: [ "stop", "rke2-server.service" ]
         - name: 'Rotate certificates'
-          command: 'rke2 certificate rotate'
-        - name: 'Remove kube-controller-manager cert'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.crt'
-        - name: 'Remove kube-controller-manager key'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.key'
-        - name: 'Remove kube-controller-manager manifest'
-          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-controller-manager.yaml'
-        - name: 'Remove kube-scheduler cert'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.crt'
-        - name: 'Remove kube-scheduler key'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.key'
-        - name: 'Remove kube-scheduler manifest'
-          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-scheduler.yaml'
-        - name: 'Remove manifests'
-          command: 'rm -rf /var/lib/rancher/rke2/server/manifests-*.yaml'
+          command: rke2
+          args: [ "certificate", "rotate" ]
+        #        - name: 'Remove kube-controller-manager cert'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.crt'
+        #        - name: 'Remove kube-controller-manager key'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.key'
+        #        - name: 'Remove kube-controller-manager manifest'
+        #          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-controller-manager.yaml'
+        #        - name: 'Remove kube-scheduler cert'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.crt'
+        #        - name: 'Remove kube-scheduler key'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.key'
+        #        - name: 'Remove kube-scheduler manifest'
+        #          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-scheduler.yaml'
+        #        - name: 'Remove manifests'
+        #          command: 'rm -rf /var/lib/rancher/rke2/server/manifests-*.yaml'
         - name: 'Restart service'
-          command: 'systemctl restart rke2-server.service'
+          command: systemctl
+          args: [ "restart", "rke2-server.service" ]
     - selector:
         matchExpressions:
-          - key: agent.cattle.io/etcd-role
-            operator: NotIn
-            values: [ "true" ]
-          - key: agent.cattle.io/controlplane-role
+          - key: rke.cattle.io/etcd-role
             operator: In
             values: [ "true" ]
-          - key: agent.cattle.io/worker-role
-            operator: NotIn
+          - key: rke.cattle.io/control-plane-role
+            operator: In
             values: [ "true" ]
-      commands:
+          - key: rke.cattle.io/worker-role
+            operator: In
+            values: [ "true" ]
+      instructions:
         - name: 'Stop service'
-          command: 'systemctl stop rke2-server.service'
+          command: systemctl
+          args: [ "stop", "rke2-server.service" ]
         - name: 'Rotate certificates'
-          command: 'rke2 certificate rotate'
-        - name: 'Remove kube-controller-manager cert'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.crt'
-        - name: 'Remove kube-controller-manager key'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.key'
-        - name: 'Remove kube-controller-manager manifest'
-          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-controller-manager.yaml'
-        - name: 'Remove kube-scheduler cert'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.crt'
-        - name: 'Remove kube-scheduler key'
-          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.key'
-        - name: 'Remove kube-scheduler manifest'
-          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-scheduler.yaml'
-        - name: 'Remove manifests'
-          command: 'rm -rf /var/lib/rancher/rke2/server/manifests-*.yaml'
+          command: rke2
+          args: [ "certificate", "rotate" ]
         - name: 'Restart service'
-          command: 'systemctl restart rke2-server.service'
+          command: systemctl
+          args: [ "restart", "rke2-server.service" ]
     - selector:
         matchExpressions:
-          - key: agent.cattle.io/etcd-role
+          - key: rke.cattle.io/etcd-role
             operator: NotIn
             values: [ "true" ]
-          - key: agent.cattle.io/controlplane-role
-            operator: NotIn
-            values: [ "true" ]
-          - key: agent.cattle.io/worker-role
+          - key: rke.cattle.io/control-plane-role
             operator: In
             values: [ "true" ]
-          - key: agent.cattle.io/os
+          - key: rke.cattle.io/worker-role
+            operator: NotIn
+            values: [ "true" ]
+      instructions:
+        - name: 'Stop service'
+          command: systemctl
+          args: [ "stop", "rke2-server.service" ]
+        - name: 'Rotate certificates'
+          command: rke2
+          args: [ "certificate", "rotate" ]
+        #        - name: 'Remove kube-controller-manager cert'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.crt'
+        #        - name: 'Remove kube-controller-manager key'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.key'
+        #        - name: 'Remove kube-controller-manager manifest'
+        #          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-controller-manager.yaml'
+        #        - name: 'Remove kube-scheduler cert'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.crt'
+        #        - name: 'Remove kube-scheduler key'
+        #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.key'
+        #        - name: 'Remove kube-scheduler manifest'
+        #          command: 'rm -f /var/lib/rancher/rke2/agent/pod-manifests/kube-scheduler.yaml'
+        #        - name: 'Remove manifests'
+        #          command: 'rm -rf /var/lib/rancher/rke2/server/manifests-*.yaml'
+        - name: 'Restart service'
+          command: systemctl
+          args: [ "restart", "rke2-server.service" ]
+    - selector:
+        matchExpressions:
+          - key: rke.cattle.io/etcd-role
+            operator: NotIn
+            values: [ "true" ]
+          - key: rke.cattle.io/control-plane-role
+            operator: NotIn
+            values: [ "true" ]
+          - key: rke.cattle.io/worker-role
+            operator: In
+            values: [ "true" ]
+          - key: cattle.io/os
             operator: NotIn
             values: [ "windows" ]
-      commands:
+      instructions:
         - name: 'Restart service'
-          command: 'systemctl restart rke2-agent.service'
+          command: systemctl
+          args: [ "restart", "rke2-agent.service" ]
     - selector:
         matchExpressions:
-          - key: agent.cattle.io/etcd-role
+          - key: rke.cattle.io/etcd-role
             operator: NotIn
             values: [ "true" ]
-          - key: agent.cattle.io/controlplane-role
+          - key: rke.cattle.io/control-plane-role
             operator: NotIn
             values: [ "true" ]
-          - key: agent.cattle.io/worker-role
+          - key: rke.cattle.io/worker-role
             operator: In
             values: [ "true" ]
-          - key: agent.cattle.io/os
+          - key: cattle.io/os
             operator: In
             values: [ "windows" ]
-      commands:
+      instructions:
         - name: 'Restart service'
-          command: 'restart-service rke2'
+          command: 'restart-service'
+          args: [ "rke2" ]
 status:
