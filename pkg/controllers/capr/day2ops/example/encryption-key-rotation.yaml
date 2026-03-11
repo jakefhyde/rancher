@@ -1,31 +1,75 @@
-apiVersion: agent.cattle.io/v1
+apiVersion: plan.cattle.io/v1alpha1
 kind: ClusterPlan
 metadata:
   namespace: fleet-default
-  name: jhyde-test-encryption-key-rotation
+  name: jhyde-rke2-test-cluster-plan
 spec:
   nodePlan:
     - selector:
-        matchExpressions:
-          - key: agent.cattle.io/control-plane-leader
-            operator: In
-            values: [ "true" ]
+        nodeElection:
+          strategy: FirstFound
+          targetLabel: rke.cattle.io/control-plane-bootstrap
+          preferences:
+            - matchLabels:
+                rke.cattle.io/control-plane-bootstrap: "true"
+            - matchLabels:
+                rke.cattle.io/bootstrap-role: "true"
+              matchExpressions:
+                - key: rke.cattle.io/control-plane-role
+                  operator: In
+                  values: [ "true" ]
+                - key: rke.cattle.io/etcd-role
+                  operator: In
+                  values: [ "true" ]
+            - matchExpressions:
+                - key: rke.cattle.io/control-plane-role
+                  operator: In
+                  values: [ "true" ]
+                - key: rke.cattle.io/etcd-role
+                  operator: In
+                  values: [ "true" ]
+            - matchExpressions:
+                - key: rke.cattle.io/control-plane-role
+                  operator: In
+                  values: [ "true" ]
       commands:
         - name: 'Rotate keys'
-          command: 'rke2 secrets-encrypt rotate-keys'
+          command: rke2
+          args: [ "secrets-encrypt", "rotate-keys" ]
         - name: 'Validate status'
-          command: 'rke2 secrets-encrypt status' # need to parse json to get stage as reencrypt_finished
+          command: rke2
+          args: [ "secrets-encrypt", "status", "--output", "json" ]
+          expect:
+            jsonPath: "{.stage}"
+            equals: reencrypt_finished
+            inProgress: reencrypt_active
         - name: 'Restart service'
-          command: 'systemctl restart rke2-server.service'
+          command: systemctl
+          args: [ "restart", "rke2-server.service" ]
+        - name: 'Wait for service to be ready'
+          command: systemctl
+          args: [ "is-active", "rke2-server.service" ]
+          failureThreshold: 30
+          backoffLimit: 10
     - selector:
+        matchLabels:
+          - key: rke.cattle.io/control-plane-role
         matchExpressions:
-          - key: agent.cattle.io/control-plane
-            operator: In
-            values: [ "true" ]
-          - key: agent.cattle.io/control-plane-leader
+          - key: rke.cattle.io/control-plane-bootstrap
             operator: NotIn
             values: [ "true" ]
       commands:
         - name: 'Restart service'
-          command: 'systemctl restart rke2-server.service'
-status:
+          command: systemctl
+          args: [ "restart", "rke2-server.service" ]
+        - name: 'Wait for service to be ready'
+          failureThreshold: 30
+          backoffLimit: 10
+        - name: 'Validate status'
+          command: rke2
+          args: [ "secrets-encrypt", "status", "--output", "json" ]
+          failureThreshold: 30
+          backoffLimit: 10
+          expect:
+            jsonPath: "{.stage}"
+            equals: reencrypt_finished

@@ -11,7 +11,7 @@ spec:
   nodePlan:
     - selector:
         matchExpressions:
-          - key: agent.cattle.io/os
+          - key: rke.cattle.io/os
             operator: NotIn
             values: [ "windows" ]
       commands:

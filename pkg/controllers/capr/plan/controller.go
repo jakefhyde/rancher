@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base32"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"slices"
@@ -15,7 +16,9 @@ import (
 	"github.com/rancher/rancher/pkg/wrangler"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/name"
+	"github.com/rancher/wrangler/v3/pkg/relatedresource"
 	"github.com/sirupsen/logrus"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -46,6 +49,18 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext) {
 
 	clients.Plan.ClusterPlan().OnChange(ctx, "cluster-plan", h.OnClusterPlanChange)
 	clients.Plan.NodePlan().OnChange(ctx, "node-plan", h.OnNodePlanChange)
+
+	relatedresource.Watch(ctx, "machine-plan-node-plan", func(_, _ string, obj runtime.Object) ([]relatedresource.Key, error) {
+		if secret, ok := obj.(*corev1.Secret); ok {
+			return []relatedresource.Key{
+				{
+					Namespace: secret.Namespace,
+					Name:      name.SafeConcatName(secret.Name, "machine", "plan"),
+				},
+			}, nil
+		}
+		return nil, nil
+	}, clients.Plan.NodePlan(), clients.Core.Secret())
 }
 
 func (h *handler) OnClusterPlanChange(_ string, plan *planv1alpha1.ClusterPlan) (*planv1alpha1.ClusterPlan, error) {
@@ -216,30 +231,61 @@ func (h *handler) OnClusterPlanChange(_ string, plan *planv1alpha1.ClusterPlan) 
 }
 
 func (h *handler) OnNodePlanChange(_ string, plan *planv1alpha1.NodePlan) (*planv1alpha1.NodePlan, error) {
-	if plan == nil {
+	if plan == nil || plan.DeletionTimestamp != nil {
 		return nil, nil
 	}
 
-	// todo(jhyde): remove all this
-	mps, err := h.secrets.Get(plan.Namespace, name.SafeConcatName(plan.Name, "machine", "plan"), metav1.GetOptions{})
+	// 1. Get the Secret associated with this NodePlan
+	secretName := name.SafeConcatName(plan.Name, "machine", "plan")
+	mps, err := h.secrets.Get(plan.Namespace, secretName, metav1.GetOptions{})
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return plan, nil // Wait for secret to be created
+		}
 		return nil, err
 	}
 
-
-	b, err := json.Marshal(plan.Spec)
+	// 2. Calculate the checksum of the current Spec
+	planData, err := json.Marshal(plan.Spec)
 	if err != nil {
 		return nil, err
 	}
+	sum := sha256.Sum256(planData)
+	planChecksum := hex.EncodeToString(sum[:])
 
-	// todo(jhyde): apply checksum
+	// 3. Check if the node agent has reported success via appliedChecksum
+	appliedChecksum := string(mps.Data["applied-checksum"])
 
-	mps = mps.DeepCopy()
-	mps.Data["plan"] = b
+	if appliedChecksum == planChecksum {
+		if plan.Status.Phase != planv1alpha1.NodePlanPhaseSucceeded {
+			logrus.Infof("[nodeplan] plan %s/%s applied successfully (checksum matches)", plan.Namespace, plan.Name)
+			plan = plan.DeepCopy()
+			plan.Status.Phase = planv1alpha1.NodePlanPhaseSucceeded
+			return h.nodePlan.UpdateStatus(plan)
+		}
+		return plan, nil
+	}
 
-	_, err = h.secrets.Update(mps)
-	if err != nil {
-		return nil, err
+	// 4. If not applied yet, ensure the Secret has the latest plan and the target checksum
+	if string(mps.Data["plan"]) != string(planData) {
+		mps = mps.DeepCopy()
+		if mps.Data == nil {
+			mps.Data = map[string][]byte{} // Ensure map is initialized
+		}
+		mps.Data["plan"] = planData
+
+		logrus.Debugf("[nodeplan] updating secret %s/%s with new plan hash %s", plan.Namespace, secretName, planChecksum)
+		_, err = h.secrets.Update(mps)
+		if err != nil {
+			return nil, err
+		}
+
+		// Reset phase to running/processing if the plan changed
+		if plan.Status.Phase != planv1alpha1.NodePlanPhaseRunning {
+			plan = plan.DeepCopy()
+			plan.Status.Phase = planv1alpha1.NodePlanPhaseRunning
+			return h.nodePlan.UpdateStatus(plan)
+		}
 	}
 
 	return plan, nil

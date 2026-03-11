@@ -1,9 +1,47 @@
 package v1alpha1
 
-import metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/intstr"
+)
 
 type ClusterPlanSpec struct {
 	Plan []NodePoolPlan `json:"plan,omitempty"`
+
+	Files        []NodePoolFile        `json:"files,omitempty"`
+	Probes       []NodePoolProbe       `json:"probes,omitempty"`
+	Instructions []NodePoolInstruction `json:"instructions,omitempty"`
+}
+
+type NodePoolPlan struct {
+	// +optional
+	Selector     metav1.LabelSelector `json:"selector,omitempty"`
+	NodePlanSpec `json:",inline"`
+}
+
+type NodeElection struct {
+	TargetLabel string                 `json:"targetLabel,omitempty"`
+	Selector    []metav1.LabelSelector `json:"selector,omitempty"`
+}
+
+type NodePoolConcurrency struct {
+	Selector    []metav1.LabelSelector `json:"selector,omitempty"`
+	Concurrency `json:",inline"`
+}
+
+type NodePoolFile struct {
+	Selector []metav1.LabelSelector `json:"selector,omitempty"`
+	File     `json:",inline"`
+}
+
+type NodePoolProbe struct {
+	Selector []metav1.LabelSelector `json:"selector,omitempty"`
+	Probe    `json:",inline"`
+}
+
+type NodePoolInstruction struct {
+	Selector    []metav1.LabelSelector `json:"selector,omitempty"`
+	Instruction `json:",inline"`
 }
 
 type ClusterPlanStatus struct {
@@ -33,13 +71,6 @@ type ClusterPlan struct {
 	Status ClusterPlanStatus `json:"status,omitempty"`
 }
 
-type NodePoolPlan struct {
-	// +optional
-	Selector     metav1.LabelSelector `json:"selector,omitempty"`
-	Concurrency  int                  `json:"concurrency,omitempty"`
-	NodePlanSpec `json:",inline"`
-}
-
 // +genclient
 // +kubebuilder:resource:path=nodeplans,scope=Namespaced
 // +kubebuilder:subresource:status
@@ -63,7 +94,11 @@ type NodePlanSpec struct {
 }
 
 type File struct {
-	Content     string `json:"content,omitempty"`
+	Content string `json:"content,omitempty"`
+
+	// +optional
+	// Drain determines whether the associated node should be drained when this file is changed
+	Drain       bool   `json:"drain,omitempty"`
 	Path        string `json:"path,omitempty"`
 	Permissions string `json:"permissions,omitempty"`
 }
@@ -125,6 +160,8 @@ type HTTPGetAction struct {
 	ClientKey  string `json:"clientKey,omitempty"`
 	CACert     string `json:"caCert,omitempty"`
 }
+
+type Concurrency = intstr.IntOrString
 
 const ClusterPlanHashLabel = "plan.cattle.io/clusterplan-hash"
 

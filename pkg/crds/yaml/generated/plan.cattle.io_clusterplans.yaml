@@ -41,6 +41,8 @@ spec:
               plan:
                 items:
                   properties:
+                    concurrency:
+                      type: integer
                     files:
                       items:
                         properties:
@@ -151,6 +153,11 @@ spec:
                 type: array
             type: object
           status:
+            properties:
+              currentStep:
+                type: integer
+              phase:
+                type: string
             type: object
         type: object
     served: true
