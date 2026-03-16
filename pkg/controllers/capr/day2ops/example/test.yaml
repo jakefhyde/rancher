@@ -1,0 +1,245 @@
+spec:
+  files:
+    #    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-bootstrap.yaml
+    #      drain: true
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-etcd-role-config.yaml
+      selector:
+        - matchLabels:
+            rke.cattle.io/etcd-role: "true"
+      content: |
+        etcd-expose-metrics: false,
+        etcd-snapshot-retention: 5,
+        etcd-snapshot-schedule-cron: "0 */5 * * *",
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-etcd-only-role-config.yaml
+      selector:
+        - matchLabels:
+            rke.cattle.io/etcd-role: "true"
+          matchExpressions:
+            - { key: rke.cattle.io/control-plane-role, operator: NotIn, values: [ "true" ] }
+      drain: true
+      content: |
+        disable-apiserver: true
+        disable-scheduler: true
+        disable-controller-manager: true
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-controlplane-role-config.yaml
+      selector:
+        - matchLabels:
+            rke.cattle.io/control-plane-role: "true"
+      drain: true
+      content: |
+        kube-controller-manager-arg:
+          - "cert-dir=/var/lib/rancher/rke2/server/tls/kube-controller-manager",
+          - "secure-port=10257"
+        kube-controller-manager-extra-mount:
+          - "/var/lib/rancher/rke2/server/tls/kube-controller-manager:/var/lib/rancher/rke2/server/tls/kube-controller-manager"
+        kube-scheduler-arg: 
+          - "cert-dir=/var/lib/rancher/rke2/server/tls/kube-scheduler",
+          - "secure-port=10259"
+        kube-scheduler-extra-mount:
+          - "/var/lib/rancher/rke2/server/tls/kube-scheduler:/var/lib/rancher/rke2/server/tls/kube-scheduler"
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-controlplane-only-role-config.yaml
+      selector:
+        - matchLabels:
+            rke.cattle.io/control-plane-role: "true"
+          matchExpressions:
+            - { key: rke.cattle.io/etcd-role, operator: NotIn, values: [ "true" ] }
+      drain: true
+      content: |
+        disable-etcd: true
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-all.yaml
+      drain: true
+      content: |
+        private-registry: "/etc/rancher/rke2/registries.yaml"
+        protect-kernel-defaults: false
+    - path: /etc/rancher/rke2/registries.yaml
+      drain: true
+      content: |
+        configs: {}
+        mirrors: {}
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-server-role-config.yaml
+      selector:
+        - matchExpressions:
+            - { key: rke.cattle.io/etcd-role, operator: In, values: [ "true" ] }
+        - matchExpressions:
+            - { key: rke.cattle.io/control-plane-role, operator: In, values: [ "true" ] }
+      drain: true
+      content: |
+        agent-token: '{{ fetch "" | jsonPath ".data.agentToken" }}'
+        cni: calico
+        disable-kube-proxy: false
+        ingress-controller: traefik
+        token: "{{ serverToken }}"
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-server-join.yaml
+      selector:
+        - matchExpressions:
+            - { key: rke.cattle.io/etcd-role, operator: In, values: [ "true" ] }
+        - matchExpressions:
+            - { key: rke.cattle.io/control-plane-role, operator: In, values: [ "true" ] }
+      content: |
+        server: {{ leader "rke.cattle.io/bootstrap-role" | output "join-url" }}
+    - path: /etc/rancher/rke2/config.yaml.d/50-rancher-worker-join.yaml
+      selector:
+        - matchLabels:
+            rke.cattle.io/worker-role: "true"
+      content: |
+        server: {{ shard "rke.cattle.io/control-plane-role" | output "join-url" }}
+  probes:
+    - name: etcd
+      selector:
+        matchLabels:
+          rke.cattle.io/etcd-role: "true"
+      probe:
+        initialDelaySeconds: 1
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 2
+        httpGet:
+          url: "http://localhost:2381/healthz"
+    - name: kube-apiserver
+      selector:
+        matchLabels:
+          rke.cattle.io/control-plane-role: "true"
+      probe:
+        initialDelaySeconds: 1
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 2
+        httpGet:
+          url: "http://localhost:6443/readyz"
+          clientCert: "/var/lib/rancher/rke2/server/tls/client-kube-apiserver.crt"
+          clientKey: "/var/lib/rancher/rke2/server/tls/client-kube-apiserver.key"
+          caCert: "/var/lib/rancher/rke2/server/tls/server-ca.crt"
+    - name: kube-controller-manager
+      selector:
+        matchLabels:
+          rke.cattle.io/control-plane-role: "true"
+      probe:
+        initialDelaySeconds: 1
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 2
+        httpGet:
+          url: "http://localhost:10257/healthz"
+          caCert: "/var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.crt"
+    - name: kube-scheduler
+      selector:
+        matchLabels:
+          rke.cattle.io/control-plane-role: "true"
+      probe:
+        initialDelaySeconds: 1
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 2
+        httpGet:
+          url: "http://localhost:10259/healthz"
+          caCert: "/var/lib/rancher/rke2/server/tls/kube-scheduler/kube-scheduler.crt"
+    - name: kubelet
+      probe:
+        initialDelaySeconds: 1
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 2
+        httpGet:
+          url: "http://localhost:10248/healthz"
+  plan:
+    - name: bootstrap
+      election:
+        targetLabel: rke.cattle.io/bootstrap-role
+        selector:
+          - matchLabels:
+              rke.cattle.io/etcd-role: "true"
+        criteria:
+          - '{{ owner "machine.cluster.x-k8s.io" | fetch | jsonPath "metadata.deletionTimestamp" | isNil }}'
+          - '{{ owner "machine.cluster.x-k8s.io" | fetch | getCondition "InfrastructureReady" | eq "True" }}'
+      instructions:
+        - name: 'Bootstrap'
+          image: 'rancher/system-agent-installer-rke2:v1.31.1-rke2r1'
+          command: sh
+          args: [ '-c', 'run.sh' ]
+        - name: 'Extract Join URL'
+          command: sh
+          args: [ '-c', 'curl', '--cacert', '/var/lib/rancher/rke2/server/tls/server-ca.crt https:/localhost:9345/db/info' ]
+          saveOutput: true
+          expect:
+            jsonPath: '.clientURLs[0]'
+      outputs:
+        - name: 'join-url'
+          source: '{{ instruction 1 | jsonPath ".clientURLs[0]" }}'
+          persistent: true
+      patches:
+        before:
+          - name: bootstrappedCondition
+            definitions:
+              - selector:
+                  apiVersion: rke.cattle.io/v1
+                  kind: RKEControlPlane
+                  namespace: fleet-default
+                  name: jhyde-rke2-test
+                jsonPatches:
+                  - op: add
+                    path: "/status/conditions/-"
+                    value:
+                      type: "Bootstrapped"
+                      status: "False"
+                      lastTransitionTime: "{{ .Timestamp }}"
+                      reason: "BootstrapNodeReconciled"
+                      message: "The bootstrap node is being elected and reconciled."
+        after:
+          - name: bootstrappedCondition
+            definitions:
+              - selector:
+                  apiVersion: rke.cattle.io/v1
+                  kind: RKEControlPlane
+                  namespace: fleet-default
+                  name: jhyde-rke2-test
+                jsonPatches:
+                  - op: add
+                    path: "/status/conditions/-"
+                    value:
+                      type: "Bootstrapped"
+                      status: "True"
+                      lastTransitionTime: "{{ .Timestamp }}"
+                      reason: "BootstrapNodeReconciled"
+                      message: "The bootstrap node has been elected and reconciled."
+    - name: etcd
+      selector:
+        - matchLabels:
+            rke.cattle.io/etcd-role: "true"
+          matchExpressions:
+            - { key: rke.cattle.io/bootstrap-role, operator: NotIn, values: [ "true" ] }
+      instructions:
+        - name: 'Bootstrap'
+          image: 'rancher/system-agent-installer-rke2:v1.31.1-rke2r1'
+          command: sh
+          args: [ '-c', 'run.sh' ]
+      outputs:
+        - name: 'join-url'
+          source: '{{ owner "machine.cluster.x-k8s.io" | jsonPath ".status.addresses[?(@.type=="InternalIP" || @.type=="ExternalIP")].address" }}'
+          persistent: true
+    - name: controlplane
+      selector:
+        - matchLabels:
+            rke.cattle.io/control-plane-role: "true"
+          matchExpressions:
+            - { key: rke.cattle.io/etcd-role, operator: NotIn, values: [ "true" ] }
+      instructions:
+        - name: 'Bootstrap'
+          image: 'rancher/system-agent-installer-rke2:v1.31.1-rke2r1'
+          command: sh
+          args: [ '-c', 'run.sh' ]
+      outputs:
+        - name: 'join-url'
+          source: '{{ owner "machine.cluster.x-k8s.io" | jsonPath ".status.addresses[?(@.type=="InternalIP" || @.type=="ExternalIP")].address" }}'
+          persistent: true
+    - name: worker
+      selector:
+        - matchLabels:
+            rke.cattle.io/worker-role: "true"
+          matchExpressions:
+            - { key: rke.cattle.io/etcd-role, operator: NotIn, values: [ "true" ] }
+            - { key: rke.cattle.io/control-plane-role, operator: NotIn, values: [ "true" ] }
+      instructions:
+        - name: 'Bootstrap'
+          image: 'rancher/system-agent-installer-rke2:v1.31.1-rke2r1'
+          command: sh
+          args: [ '-c', 'run.sh' ]

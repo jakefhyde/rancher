@@ -15,13 +15,45 @@ type ClusterPlanSpec struct {
 
 type NodePoolPlan struct {
 	// +optional
-	Selector     metav1.LabelSelector `json:"selector,omitempty"`
+	Selector *metav1.LabelSelector `json:"selector,omitempty"`
+	Election *NodeElection         `json:"election,omitempty"`
+	Patches  Patches               `json:"patches,omitempty"`
+
 	NodePlanSpec `json:",inline"`
 }
 
+type Patches struct {
+	Before []Patch `json:"before,omitempty"`
+	After  []Patch `json:"after,omitempty"`
+}
+
+type Patch struct {
+	Name        string            `json:"name,omitempty"`
+	Definitions []PatchDefinition `json:"definitions,omitempty"`
+}
+
+type PatchDefinition struct {
+	Selector    PatchSelector `json:"selector,omitempty"` //todo(jhyde): fix
+	JSONPatches []JSONPatch   `json:"jsonPatches,omitempty"`
+}
+
+type PatchSelector struct {
+	APIVersion string `json:"apiVersion,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name,omitempty"`
+}
+
+type JSONPatch struct {
+	Op    string `json:"op,omitempty"`
+	Path  string `json:"path,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
 type NodeElection struct {
-	TargetLabel string                 `json:"targetLabel,omitempty"`
-	Selector    []metav1.LabelSelector `json:"selector,omitempty"`
+	TargetLabel string               `json:"targetLabel,omitempty"`
+	Selector    metav1.LabelSelector `json:"selector,omitempty"`
+	Criteria    []string             `json:"criteria,omitempty"`
 }
 
 type NodePoolConcurrency struct {
@@ -91,6 +123,8 @@ type NodePlan struct {
 type NodePlanSpec struct {
 	Files        []File        `json:"files,omitempty"`
 	Instructions []Instruction `json:"instructions,omitempty"`
+	Probes       []Probe       `json:"probes,omitempty"`
+	Outputs      []Output      `json:"outputs,omitempty"`
 }
 
 type File struct {
@@ -110,8 +144,11 @@ type Instruction struct {
 	Args    []string `json:"args,omitempty"`
 	Image   string   `json:"image,omitempty"`
 
-	PreserveStdout bool `json:"preserveStdout,omitempty"`
-	PreserveStderr bool `json:"preserveStderr,omitempty"`
+	// todo(jhyde): replace
+	//PreserveStdout bool `json:"preserveStdout,omitempty"`
+	//PreserveStderr bool `json:"preserveStderr,omitempty"`
+	// todo(jhyde): remove
+	SaveOutput bool `json:"saveOutput,omitempty"`
 
 	Strategy InstructionStrategy `json:"strategy,omitempty"`
 }
@@ -161,6 +198,12 @@ type HTTPGetAction struct {
 	CACert     string `json:"caCert,omitempty"`
 }
 
+type Output struct {
+	Name       string `json:"name,omitempty"`
+	Source     string `json:"source,omitempty"`
+	Persistent bool   `json:"persistent,omitempty"`
+}
+
 type Concurrency = intstr.IntOrString
 
 const ClusterPlanHashLabel = "plan.cattle.io/clusterplan-hash"
@@ -174,4 +217,11 @@ type NodePlanStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	Phase string `json:"phase,omitempty"`
+
+	Outputs map[string]OutputStatus `json:"outputs,omitempty"`
+}
+
+type OutputStatus struct {
+	Value      string `json:"value,omitempty"`
+	Persistent bool   `json:"persistent,omitempty"`
 }
