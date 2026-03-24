@@ -4,30 +4,50 @@ metadata:
   namespace: fleet-default
   name: jhyde-rke2-test-cluster-plan
 spec:
+  instructions:
+    - selector:
+        - matchExpressions:
+            - key: rke.cattle.io/etcd-role
+              operator: In
+              values: [ "true" ]
+        - matchExpressions:
+            - key: rke.cattle.io/controlplane-role
+              operator: In
+              values: [ "true" ]
+      instructions:
+        - name: 'Stop service'
+          command: systemctl
+          args: [ "stop", "rke2-server.service" ]
+        - name: 'Rotate certificates'
+          command: rke2
+          args: [ "certificate", "rotate" ]
+    - selector:
+        - matchExpressions:
+            - key: rke.cattle.io/controlplane-role
+              operator: In
+              values: [ "true" ]
+      instructions:
+        - name: 'Remove manifests'
+          command: 'rm -rf /var/lib/{{ machines data dir }}/rke2/server/manifests-*.yaml'
+    - selector:
+        - matchExpressions:
+            - key: rke.cattle.io/etcd-role
+              operator: In
+              values: [ "true" ]
+        - matchExpressions:
+            - key: rke.cattle.io/controlplane-role
+              operator: In
+              values: [ "true" ]
+      instructions:
+        - name: 'Restart service'
+          command: systemctl
+          args: [ "restart", "rke2-server.service" ]
   plan:
     - selector:
         matchExpressions:
           - key: rke.cattle.io/etcd-role
             operator: In
             values: [ "true" ]
-          - key: rke.cattle.io/control-plane-role
-            operator: NotIn
-            values: [ "true" ]
-          - key: rke.cattle.io/worker-role
-            operator: NotIn
-            values: [ "true" ]
-      instructions:
-        - name: 'Stop service'
-          command: systemctl
-          args: [ "stop", "rke2-server.service" ]
-        - name: 'Rotate certificates'
-          command: rke2
-          args: [ "certificate", "rotate" ]
-        - name: 'Remove manifests'
-        #          command: 'rm -rf /var/lib/rancher/rke2/server/manifests-*.yaml'
-        - name: 'Restart service'
-          command: systemctl
-          args: [ "restart", "rke2-server.service" ]
     - selector:
         matchExpressions:
           - key: rke.cattle.io/etcd-role
@@ -40,12 +60,6 @@ spec:
             operator: NotIn
             values: [ "true" ]
       instructions:
-        - name: 'Stop service'
-          command: systemctl
-          args: [ "stop", "rke2-server.service" ]
-        - name: 'Rotate certificates'
-          command: rke2
-          args: [ "certificate", "rotate" ]
         #        - name: 'Remove kube-controller-manager cert'
         #          command: 'rm -f /var/lib/rancher/rke2/server/tls/kube-controller-manager/kube-controller-manager.crt'
         #        - name: 'Remove kube-controller-manager key'

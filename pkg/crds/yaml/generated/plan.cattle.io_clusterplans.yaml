@@ -38,16 +38,242 @@ spec:
             type: object
           spec:
             properties:
+              files:
+                items:
+                  properties:
+                    content:
+                      type: string
+                    drain:
+                      description: Drain determines whether the associated node should
+                        be drained when this file is changed
+                      type: boolean
+                    path:
+                      type: string
+                    permissions:
+                      type: string
+                    selector:
+                      items:
+                        description: |-
+                          A label selector is a label query over a set of resources. The result of matchLabels and
+                          matchExpressions are ANDed. An empty label selector matches all objects. A null
+                          label selector matches no objects.
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector
+                              requirements. The requirements are ANDed.
+                            items:
+                              description: |-
+                                A label selector requirement is a selector that contains values, a key, and an operator that
+                                relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector
+                                    applies to.
+                                  type: string
+                                operator:
+                                  description: |-
+                                    operator represents a key's relationship to a set of values.
+                                    Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: |-
+                                    values is an array of string values. If the operator is In or NotIn,
+                                    the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                    the values array must be empty. This array is replaced during a strategic
+                                    merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                            x-kubernetes-list-type: atomic
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                              map is equivalent to an element of matchExpressions, whose key field is "key", the
+                              operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      type: array
+                  type: object
+                type: array
+              instructions:
+                items:
+                  properties:
+                    args:
+                      items:
+                        type: string
+                      type: array
+                    command:
+                      type: string
+                    env:
+                      items:
+                        type: string
+                      type: array
+                    image:
+                      type: string
+                    name:
+                      type: string
+                    saveOutput:
+                      description: |-
+                        todo(jhyde): replace
+                        PreserveStdout bool `json:"preserveStdout,omitempty"`
+                        PreserveStderr bool `json:"preserveStderr,omitempty"`
+                        todo(jhyde): remove
+                      type: boolean
+                    selector:
+                      items:
+                        description: |-
+                          A label selector is a label query over a set of resources. The result of matchLabels and
+                          matchExpressions are ANDed. An empty label selector matches all objects. A null
+                          label selector matches no objects.
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector
+                              requirements. The requirements are ANDed.
+                            items:
+                              description: |-
+                                A label selector requirement is a selector that contains values, a key, and an operator that
+                                relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector
+                                    applies to.
+                                  type: string
+                                operator:
+                                  description: |-
+                                    operator represents a key's relationship to a set of values.
+                                    Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: |-
+                                    values is an array of string values. If the operator is In or NotIn,
+                                    the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                    the values array must be empty. This array is replaced during a strategic
+                                    merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                            x-kubernetes-list-type: atomic
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                              map is equivalent to an element of matchExpressions, whose key field is "key", the
+                              operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      type: array
+                    strategy:
+                      properties:
+                        failureThreshold:
+                          description: How many times an action can fail before marking
+                            the plan as failed
+                          type: integer
+                        periodSeconds:
+                          type: integer
+                        retryOnStartup:
+                          description: If a command should be executed when the agent
+                            is started
+                          type: boolean
+                        retryOnSuccess:
+                          description: If not idempotent, mark the whole plan as failed
+                            if agent exits before it finishes
+                          type: boolean
+                        successThreshold:
+                          description: How many times an action has to be run before
+                            being considered successful
+                          type: integer
+                        timeoutSeconds:
+                          type: integer
+                      type: object
+                  type: object
+                type: array
               plan:
                 items:
                   properties:
-                    concurrency:
-                      type: integer
+                    election:
+                      properties:
+                        criteria:
+                          items:
+                            type: string
+                          type: array
+                        selector:
+                          description: |-
+                            A label selector is a label query over a set of resources. The result of matchLabels and
+                            matchExpressions are ANDed. An empty label selector matches all objects. A null
+                            label selector matches no objects.
+                          properties:
+                            matchExpressions:
+                              description: matchExpressions is a list of label selector
+                                requirements. The requirements are ANDed.
+                              items:
+                                description: |-
+                                  A label selector requirement is a selector that contains values, a key, and an operator that
+                                  relates the key and values.
+                                properties:
+                                  key:
+                                    description: key is the label key that the selector
+                                      applies to.
+                                    type: string
+                                  operator:
+                                    description: |-
+                                      operator represents a key's relationship to a set of values.
+                                      Valid operators are In, NotIn, Exists and DoesNotExist.
+                                    type: string
+                                  values:
+                                    description: |-
+                                      values is an array of string values. If the operator is In or NotIn,
+                                      the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                      the values array must be empty. This array is replaced during a strategic
+                                      merge patch.
+                                    items:
+                                      type: string
+                                    type: array
+                                    x-kubernetes-list-type: atomic
+                                required:
+                                - key
+                                - operator
+                                type: object
+                              type: array
+                              x-kubernetes-list-type: atomic
+                            matchLabels:
+                              additionalProperties:
+                                type: string
+                              description: |-
+                                matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                                map is equivalent to an element of matchExpressions, whose key field is "key", the
+                                operator is "In", and the values array contains only "value". The requirements are ANDed.
+                              type: object
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        targetLabel:
+                          type: string
+                      type: object
                     files:
                       items:
                         properties:
                           content:
                             type: string
+                          drain:
+                            description: Drain determines whether the associated node
+                              should be drained when this file is changed
+                            type: boolean
                           path:
                             type: string
                           permissions:
@@ -71,9 +297,12 @@ spec:
                             type: string
                           name:
                             type: string
-                          preserveStderr:
-                            type: boolean
-                          preserveStdout:
+                          saveOutput:
+                            description: |-
+                              todo(jhyde): replace
+                              PreserveStdout bool `json:"preserveStdout,omitempty"`
+                              PreserveStderr bool `json:"preserveStderr,omitempty"`
+                              todo(jhyde): remove
                             type: boolean
                           strategy:
                             properties:
@@ -91,6 +320,123 @@ spec:
                                 description: If not idempotent, mark the whole plan
                                   as failed if agent exits before it finishes
                                 type: boolean
+                              successThreshold:
+                                description: How many times an action has to be run
+                                  before being considered successful
+                                type: integer
+                              timeoutSeconds:
+                                type: integer
+                            type: object
+                        type: object
+                      type: array
+                    outputs:
+                      items:
+                        properties:
+                          name:
+                            type: string
+                          persistent:
+                            type: boolean
+                          source:
+                            type: string
+                        type: object
+                      type: array
+                    patches:
+                      properties:
+                        after:
+                          items:
+                            properties:
+                              definitions:
+                                items:
+                                  properties:
+                                    jsonPatches:
+                                      items:
+                                        properties:
+                                          op:
+                                            type: string
+                                          path:
+                                            type: string
+                                          value:
+                                            type: string
+                                        type: object
+                                      type: array
+                                    selector:
+                                      properties:
+                                        apiVersion:
+                                          type: string
+                                        kind:
+                                          type: string
+                                        name:
+                                          type: string
+                                        namespace:
+                                          type: string
+                                      type: object
+                                  type: object
+                                type: array
+                              name:
+                                type: string
+                            type: object
+                          type: array
+                        before:
+                          items:
+                            properties:
+                              definitions:
+                                items:
+                                  properties:
+                                    jsonPatches:
+                                      items:
+                                        properties:
+                                          op:
+                                            type: string
+                                          path:
+                                            type: string
+                                          value:
+                                            type: string
+                                        type: object
+                                      type: array
+                                    selector:
+                                      properties:
+                                        apiVersion:
+                                          type: string
+                                        kind:
+                                          type: string
+                                        name:
+                                          type: string
+                                        namespace:
+                                          type: string
+                                      type: object
+                                  type: object
+                                type: array
+                              name:
+                                type: string
+                            type: object
+                          type: array
+                      type: object
+                    probes:
+                      items:
+                        properties:
+                          httpGetAction:
+                            properties:
+                              caCert:
+                                type: string
+                              clientCert:
+                                type: string
+                              clientKey:
+                                type: string
+                              insecure:
+                                type: boolean
+                              url:
+                                type: string
+                            type: object
+                          name:
+                            type: string
+                          retryStrategy:
+                            properties:
+                              failureThreshold:
+                                description: How many times an action can fail before
+                                  marking the plan as failed
+                                type: integer
+                              initialDelaySeconds:
+                                type: integer
                               successThreshold:
                                 description: How many times an action has to be run
                                   before being considered successful
@@ -149,6 +495,92 @@ spec:
                           type: object
                       type: object
                       x-kubernetes-map-type: atomic
+                  type: object
+                type: array
+              probes:
+                items:
+                  properties:
+                    httpGetAction:
+                      properties:
+                        caCert:
+                          type: string
+                        clientCert:
+                          type: string
+                        clientKey:
+                          type: string
+                        insecure:
+                          type: boolean
+                        url:
+                          type: string
+                      type: object
+                    name:
+                      type: string
+                    retryStrategy:
+                      properties:
+                        failureThreshold:
+                          description: How many times an action can fail before marking
+                            the plan as failed
+                          type: integer
+                        initialDelaySeconds:
+                          type: integer
+                        successThreshold:
+                          description: How many times an action has to be run before
+                            being considered successful
+                          type: integer
+                        timeoutSeconds:
+                          type: integer
+                      type: object
+                    selector:
+                      items:
+                        description: |-
+                          A label selector is a label query over a set of resources. The result of matchLabels and
+                          matchExpressions are ANDed. An empty label selector matches all objects. A null
+                          label selector matches no objects.
+                        properties:
+                          matchExpressions:
+                            description: matchExpressions is a list of label selector
+                              requirements. The requirements are ANDed.
+                            items:
+                              description: |-
+                                A label selector requirement is a selector that contains values, a key, and an operator that
+                                relates the key and values.
+                              properties:
+                                key:
+                                  description: key is the label key that the selector
+                                    applies to.
+                                  type: string
+                                operator:
+                                  description: |-
+                                    operator represents a key's relationship to a set of values.
+                                    Valid operators are In, NotIn, Exists and DoesNotExist.
+                                  type: string
+                                values:
+                                  description: |-
+                                    values is an array of string values. If the operator is In or NotIn,
+                                    the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                                    the values array must be empty. This array is replaced during a strategic
+                                    merge patch.
+                                  items:
+                                    type: string
+                                  type: array
+                                  x-kubernetes-list-type: atomic
+                              required:
+                              - key
+                              - operator
+                              type: object
+                            type: array
+                            x-kubernetes-list-type: atomic
+                          matchLabels:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                              map is equivalent to an element of matchExpressions, whose key field is "key", the
+                              operator is "In", and the values array contains only "value". The requirements are ANDed.
+                            type: object
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      type: array
                   type: object
                 type: array
             type: object

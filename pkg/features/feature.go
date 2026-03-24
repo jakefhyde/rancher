@@ -210,6 +210,13 @@ var (
 		false,
 		true,
 	)
+	ImportedDay2Ops = newFeature(
+		"imported-day2-ops",
+		"Enable importing day2 ops clusters",
+		true,
+		false,
+		true,
+	)
 )
 
 func ListEnabled() []string {

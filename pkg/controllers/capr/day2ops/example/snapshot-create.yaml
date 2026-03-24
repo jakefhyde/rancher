@@ -17,3 +17,28 @@ spec:
         - name: 'Restart service'
           command: systemctl
           args: [ 'restart', 'rke2-server' ]
+      patches:
+        before:
+          - name: pauseCluster
+            definitions:
+              - selector:
+                  apiVersion: cluster.x-k8s.io/v1beta2
+                  kind: Cluster
+                  namespace: fleet-default
+                  name: jhyde-rke2-test
+                jsonPatches:
+                  op: add
+                  path: "/spec/paused"
+                  value: true
+        after:
+          - name: unpauseCluster
+            definitions:
+              - selector:
+                  apiVersion: cluster.x-k8s.io/v1beta2
+                  kind: Cluster
+                  namespace: fleet-default
+                  name: jhyde-rke2-test
+                jsonPatches:
+                  op: add
+                  path: "/spec/paused"
+                  value: false

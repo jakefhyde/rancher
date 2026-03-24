@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 func (h *handler) reconcileRunning(plan *planv1alpha1.ClusterPlan) (*planv1alpha1.ClusterPlan, error) {
@@ -42,6 +43,8 @@ func (h *handler) reconcileRunning(plan *planv1alpha1.ClusterPlan) (*planv1alpha
 		}
 		nodePlans = append(nodePlans, leader)
 	}
+
+	// apply before patches
 
 	// todo(jhyde): concurrency
 	for _, np := range nodePlans {
@@ -80,6 +83,19 @@ func (h *handler) reconcileRunning(plan *planv1alpha1.ClusterPlan) (*planv1alpha
 			plan = plan.DeepCopy()
 			plan.Status.Phase = planv1alpha1.ClusterPlanPhaseFailed
 			return h.clusterPlan.UpdateStatus(plan)
+		}
+	}
+
+	// apply after patches
+	for _, ap := range step.Patches.After {
+		logrus.Debugf("[clusterplan] applying patch \"%s\" for step %d in clusterplan %s/%s", ap.Name, i, plan.Namespace, plan.Name)
+		for _, d := range ap.Definitions {
+			gvk := schema.FromAPIVersionAndKind(d.Selector.APIVersion, d.Selector.Kind)
+			o, err := h.dynamic.Get(gvk, d.Selector.Namespace, d.Selector.Name)
+			if err != nil {
+				return nil, err
+			}
+
 		}
 	}
 
@@ -151,7 +167,7 @@ func (h *handler) executeTemplate(templateStr string, data interface{}, funcs te
 	// 1. Create a new template with a unique name
 	// We use a hash or a static name because these are short-lived
 	tmpl, err := template.New("plan-template").
-		Funcs(funcs).               // Inject your generic helpers (shard, fetch, etc.)
+		Funcs(funcs). // Inject your generic helpers (shard, fetch, etc.)
 		Option("missingkey=error"). // Stop execution if a variable is missing
 		Parse(templateStr)
 

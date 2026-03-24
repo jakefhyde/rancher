@@ -22,9 +22,11 @@ import (
 	"github.com/rancher/wrangler/v3/pkg/data"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/kv"
+	"github.com/rancher/wrangler/v3/pkg/name"
 	"github.com/rancher/wrangler/v3/pkg/relatedresource"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierror "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -53,8 +55,12 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext, kubeconfigMana
 				clients.Mgmt.Cluster(),
 				clients.Provisioning.Cluster(),
 				clients.RKE.CustomMachine(),
+				clients.RKE.RKEBootstrap(),
 				clients.CAPI.Machine(),
-				clients.RKE.RKEBootstrap()),
+				clients.RBAC.Role(),
+				clients.RBAC.RoleBinding(),
+				clients.Core.ServiceAccount(),
+				clients.Core.Secret()),
 	}
 	clients.RKE.CustomMachine().OnRemove(ctx, "unmanaged-machine", h.onUnmanagedMachineOnRemove)
 	clients.RKE.CustomMachine().OnChange(ctx, "unmanaged-health", h.onUnmanagedMachineChange)
@@ -129,6 +135,135 @@ func (h *handler) findMachine(cluster *capi.Cluster, machineName, machineID stri
 	return machineName, nil
 }
 
+func (h *handler) createMachinePlanForImported(secret *corev1.Secret, data data.Object) (*corev1.Secret, error) {
+	labels := map[string]string{}
+	annotations := map[string]string{}
+
+	if data.Bool("role-control-plane") {
+		labels[capr.ControlPlaneRoleLabel] = "true"
+		labels[capi.MachineControlPlaneLabel] = "true"
+	}
+
+	if data.Bool("role-etcd") {
+		labels[capr.EtcdRoleLabel] = "true"
+	}
+
+	if data.Bool("role-worker") {
+		labels[capr.WorkerRoleLabel] = "true"
+	}
+
+	if val := data.String("node-name"); val != "" {
+		labels[capr.NodeNameLabel] = val
+	}
+
+	if address := data.String("address"); address != "" {
+		annotations[capr.AddressAnnotation] = address
+	}
+
+	if internalAddress := data.String("internal-address"); internalAddress != "" {
+		annotations[capr.InternalAddressAnnotation] = internalAddress
+	}
+
+	labelsMap := map[string]string{}
+	for _, str := range strings.Split(data.String("labels"), ",") {
+		k, v := kv.Split(str, "=")
+		if k == "" {
+			continue
+		}
+		labelsMap[k] = v
+		if _, ok := labels[k]; !ok {
+			labels[k] = v
+		}
+	}
+
+	if len(labelsMap) > 0 {
+		data, err := json.Marshal(labelsMap)
+		if err != nil {
+			return nil, err
+		}
+		annotations[capr.LabelsAnnotation] = string(data)
+	}
+
+	var coreTaints []corev1.Taint
+	for _, taint := range data.StringSlice("taints") {
+		coreTaints = append(coreTaints, taints.GetTaintsFromStrings(strings.Split(taint, ","))...)
+	}
+
+	if len(coreTaints) > 0 {
+		data, err := json.Marshal(coreTaints)
+		if err != nil {
+			return nil, err
+		}
+		annotations[capr.TaintsAnnotation] = string(data)
+	}
+
+	annotationWithTaints := func() map[string]string {
+		m := map[string]string{}
+		if annotations[capr.TaintsAnnotation] != "" {
+			m[capr.TaintsAnnotation] = annotations[capr.TaintsAnnotation]
+		}
+		return m
+	}
+
+	planSecretName := name.SafeConcatName(secret.Name, "machine", "plan")
+
+	sa := &corev1.ServiceAccount{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planSecretName,
+			Namespace: secret.Namespace,
+			Labels: map[string]string{
+				capr.RoleLabel:  capr.RolePlan,
+				capr.PlanSecret: planSecretName,
+			},
+		},
+	}
+	planSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        planSecretName,
+			Namespace:   secret.Namespace,
+			Labels:      labels,
+			Annotations: annotationWithTaints(),
+		},
+		Type: capr.SecretTypeMachinePlan,
+	}
+	role := &rbacv1.Role{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planSecretName,
+			Namespace: secret.Namespace,
+		},
+		Rules: []rbacv1.PolicyRule{
+			{
+				Verbs:         []string{"watch", "get", "update", "list"},
+				APIGroups:     []string{""},
+				Resources:     []string{"secrets"},
+				ResourceNames: []string{planSecretName},
+			},
+		},
+	}
+	roleBinding := &rbacv1.RoleBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      planSecretName,
+			Namespace: secret.Namespace,
+		},
+		Subjects: []rbacv1.Subject{
+			{
+				Kind:      "ServiceAccount",
+				Name:      sa.Name,
+				Namespace: sa.Namespace,
+			},
+		},
+		RoleRef: rbacv1.RoleRef{
+			APIGroup: rbacv1.GroupName,
+			Kind:     "Role",
+			Name:     planSecretName,
+		},
+	}
+
+	objs := []runtime.Object{sa, planSecret, role, roleBinding}
+
+	return secret, h.apply.WithOwner(secret).ApplyObjects(objs...)
+}
+
 func (h *handler) onSecretChange(_ string, secret *corev1.Secret) (*corev1.Secret, error) {
 	if secret == nil || secret.Type != capr.MachineRequestType {
 		return secret, nil
@@ -144,6 +279,11 @@ func (h *handler) onSecretChange(_ string, secret *corev1.Secret) (*corev1.Secre
 	if err := json.Unmarshal(secret.Data["data"], &data); err != nil {
 		// ignore invalid json, wait until it's valid
 		return secret, nil
+	}
+
+	if strings.HasPrefix(secret.Namespace, "c-") && len(secret.Namespace) == 7 {
+		// legacy cluster
+		return h.createMachinePlanForImported(secret, data)
 	}
 
 	capiCluster, err := h.getCAPICluster(secret)

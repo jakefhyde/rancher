@@ -13,6 +13,7 @@ import (
 	"github.com/rancher/rancher/pkg/controllers/management/gke"
 	"github.com/rancher/rancher/pkg/controllers/management/k3sbasedupgrade"
 	"github.com/rancher/rancher/pkg/controllers/management/oidcprovider"
+	"github.com/rancher/rancher/pkg/controllers/management/systemagent"
 	"github.com/rancher/rancher/pkg/features"
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/rancher/rancher/pkg/wrangler"
@@ -36,6 +37,10 @@ func RegisterWrangler(ctx context.Context, wranglerContext *wrangler.Context, ma
 
 	if features.OIDCProvider.Enabled() {
 		oidcprovider.Register(ctx, wranglerContext)
+	}
+
+	if features.ImportedDay2Ops.Enabled() {
+		systemagent.Register(ctx, wranglerContext, management, manager)
 	}
 
 	return nil

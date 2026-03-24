@@ -8,7 +8,6 @@ import (
 	plancontrollers "github.com/rancher/rancher/pkg/generated/controllers/plan.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/wrangler"
 	"github.com/rancher/wrangler/v3/pkg/name"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -25,23 +24,23 @@ func (h *handler2) OnChange(obj *rkev1.RKEControlPlane) error {
 		return nil
 	}
 
-	if obj.DeletionTimestamp != nil {
-		return nil
-	}
-
-	// get existing cluster plan
-	plan, err := h.clusterPlanCache.Get(obj.Namespace, name.SafeConcatName(obj.Name, "cluster", "plan"))
-	if !apierrors.IsNotFound(err) {
-		// get desired plan
-
-		// create
-	} else if err != nil {
-		return err
-	}
-
-	// get desired cluster plan
-	// if existing == desired, update status and exit
-
+	//if obj.DeletionTimestamp != nil {
+	//	return nil
+	//}
+	//
+	//// get existing cluster plan
+	//plan, err := h.clusterPlanCache.Get(obj.Namespace, name.SafeConcatName(obj.Name, "cluster", "plan"))
+	//if !apierrors.IsNotFound(err) {
+	//	// get desired plan
+	//
+	//	// create
+	//} else if err != nil {
+	//	return err
+	//}
+	//
+	//// get desired cluster plan
+	//// if existing == desired, update status and exit
+	//
 	return nil
 }
 

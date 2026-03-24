@@ -43,6 +43,10 @@ spec:
                   properties:
                     content:
                       type: string
+                    drain:
+                      description: Drain determines whether the associated node should
+                        be drained when this file is changed
+                      type: boolean
                     path:
                       type: string
                     permissions:
@@ -66,9 +70,12 @@ spec:
                       type: string
                     name:
                       type: string
-                    preserveStderr:
-                      type: boolean
-                    preserveStdout:
+                    saveOutput:
+                      description: |-
+                        todo(jhyde): replace
+                        PreserveStdout bool `json:"preserveStdout,omitempty"`
+                        PreserveStderr bool `json:"preserveStderr,omitempty"`
+                        todo(jhyde): remove
                       type: boolean
                     strategy:
                       properties:
@@ -86,6 +93,52 @@ spec:
                           description: If not idempotent, mark the whole plan as failed
                             if agent exits before it finishes
                           type: boolean
+                        successThreshold:
+                          description: How many times an action has to be run before
+                            being considered successful
+                          type: integer
+                        timeoutSeconds:
+                          type: integer
+                      type: object
+                  type: object
+                type: array
+              outputs:
+                items:
+                  properties:
+                    name:
+                      type: string
+                    persistent:
+                      type: boolean
+                    source:
+                      type: string
+                  type: object
+                type: array
+              probes:
+                items:
+                  properties:
+                    httpGetAction:
+                      properties:
+                        caCert:
+                          type: string
+                        clientCert:
+                          type: string
+                        clientKey:
+                          type: string
+                        insecure:
+                          type: boolean
+                        url:
+                          type: string
+                      type: object
+                    name:
+                      type: string
+                    retryStrategy:
+                      properties:
+                        failureThreshold:
+                          description: How many times an action can fail before marking
+                            the plan as failed
+                          type: integer
+                        initialDelaySeconds:
+                          type: integer
                         successThreshold:
                           description: How many times an action has to be run before
                             being considered successful
@@ -154,6 +207,15 @@ spec:
                   - type
                   type: object
                 type: array
+              outputs:
+                additionalProperties:
+                  properties:
+                    persistent:
+                      type: boolean
+                    value:
+                      type: string
+                  type: object
+                type: object
               phase:
                 type: string
             type: object

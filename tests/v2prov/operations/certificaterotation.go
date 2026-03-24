@@ -71,4 +71,6 @@ func RunCertificateRotationTest(t *testing.T, clients *clients.Clients, c *v1.Cl
 	}
 
 	assert.NotNil(t, configMap)
+
+	// ensure CAPI is healthy
 }
