@@ -1,0 +1,37 @@
+apiVersion: plan.cattle.io/v1alpha1
+kind: ClusterPlanTemplate
+metadata:
+  name: etcd-snapshot-create-imported
+  labels:
+    plan.cattle.io/builtin: "true"
+spec:
+  operation: etcd-snapshot-create
+  entrypoints:
+    - apiVersion: management.cattle.io/v3
+      kind: Cluster
+  lifecycle:
+    cancellable: false
+    cancelsOthers: false
+    timeoutSeconds: 1800
+  plan: |
+    plan:
+      - name: snapshot
+        selector:
+          matchLabels:
+            rke.cattle.io/etcd-role: "true"
+        concurrency: -1
+        instructions:
+          - name: create
+            command: {{ runtimeCommand .Entrypoint }}
+            args:
+              - etcd-snapshot
+              - save
+              {{- with index .Inputs "snapshotName" }}
+              - --name
+              - "{{ . }}"
+              {{- end }}
+            saveOutput: true
+        outputs:
+          - name: snapshot-stdout
+            source: create
+            persistent: true

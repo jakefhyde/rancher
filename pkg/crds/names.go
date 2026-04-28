@@ -31,6 +31,9 @@ func RequiredCRDs() []string {
 	if features.OIDCProvider.Enabled() {
 		requiredCRDS = append(requiredCRDS, OIDCClientCRD()...)
 	}
+	if features.ImportedDay2Ops.Enabled() {
+		requiredCRDS = append(requiredCRDS, Day2OpsCRDs()...)
+	}
 
 	requiredCRDS = append(requiredCRDS, TelemetryCRDs()...)
 
@@ -196,6 +199,19 @@ func TelemetryCRDs() []string {
 	}
 }
 
+// Day2OpsCRDs returns the CRDs that back the new ClusterPlan-based day-2 ops
+// framework (plan.cattle.io/v1alpha1). Gated by features.ImportedDay2Ops.
+func Day2OpsCRDs() []string {
+	return []string{
+		"clusterplantemplates.plan.cattle.io",
+		"clusterplans.plan.cattle.io",
+		"nodeplantemplates.plan.cattle.io",
+		"nodeplans.plan.cattle.io",
+		"beacons.plan.cattle.io",
+		"etcdsnapshotcreates.plan.cattle.io",
+	}
+}
+
 // MigratedResources map list of resource that have been migrated after all resource have a CRD this can be removed.
 var MigratedResources = map[string]bool{
 	"activedirectoryproviders.management.cattle.io":                   false,
@@ -207,10 +223,13 @@ var MigratedResources = map[string]bool{
 	"authtokens.management.cattle.io":                                 false,
 	"azureadproviders.management.cattle.io":                           false,
 	"basicauths.project.cattle.io":                                    false,
+	"beacons.plan.cattle.io":                                          true,
 	"certificates.project.cattle.io":                                  false,
 	"cloudcredentials.management.cattle.io":                           false,
 	"clusterauthtokens.cluster.cattle.io":                             false,
 	"clusterclasses.cluster.x-k8s.io":                                 false,
+	"clusterplans.plan.cattle.io":                                     true,
+	"clusterplantemplates.plan.cattle.io":                             true,
 	"clusterproxyconfigs.management.cattle.io":                        true,
 	"clusterregistrationtokens.management.cattle.io":                  false,
 	"clusterrepos.catalog.cattle.io":                                  true,
@@ -224,6 +243,7 @@ var MigratedResources = map[string]bool{
 	"custommachines.rke.cattle.io":                                    true,
 	"dockercredentials.project.cattle.io":                             false,
 	"dynamicschemas.management.cattle.io":                             true,
+	"etcdsnapshotcreates.plan.cattle.io":                              true,
 	"etcdsnapshots.rke.cattle.io":                                     true,
 	"extensionconfigs.runtime.cluster.x-k8s.io":                       false,
 	"features.management.cattle.io":                                   false,
@@ -247,6 +267,8 @@ var MigratedResources = map[string]bool{
 	"navlinks.ui.cattle.io":                                           false,
 	"nodedrivers.management.cattle.io":                                true,
 	"nodepools.management.cattle.io":                                  false,
+	"nodeplans.plan.cattle.io":                                        true,
+	"nodeplantemplates.plan.cattle.io":                                true,
 	"nodes.management.cattle.io":                                      false,
 	"oidcclients.management.cattle.io":                                true,
 	"oidcproviders.management.cattle.io":                              false,

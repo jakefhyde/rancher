@@ -103,6 +103,13 @@ func main() {
 				GenerateTypes:   true,
 				GenerateClients: true,
 			},
+			"plan.cattle.io": {
+				Types: []interface{}{
+					"./pkg/apis/plan.cattle.io/v1alpha1",
+				},
+				GenerateTypes:   true,
+				GenerateClients: true,
+			},
 			"cluster.x-k8s.io": {
 				Types: []interface{}{
 					capi.Machine{},

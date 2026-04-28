@@ -21,9 +21,12 @@ import (
 	"github.com/rancher/rancher/pkg/controllers/management/settings"
 	"github.com/rancher/rancher/pkg/controllers/management/systemagent"
 	"github.com/rancher/rancher/pkg/controllers/management/usercontrollers"
+	plancontrollers "github.com/rancher/rancher/pkg/controllers/plan"
 	"github.com/rancher/rancher/pkg/controllers/managementlegacy"
+	"github.com/rancher/rancher/pkg/features"
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/rancher/rancher/pkg/wrangler"
+	"github.com/sirupsen/logrus"
 )
 
 func Register(ctx context.Context, management *config.ManagementContext, manager *clustermanager.Manager, wrangler *wrangler.Context) {
@@ -50,6 +53,15 @@ func Register(ctx context.Context, management *config.ManagementContext, manager
 	settings.Register(ctx, management)
 	managementlegacy.Register(ctx, management, manager)
 	systemagent.Register(ctx, wrangler, manager)
+
+	// New ClusterPlan-based day 2 ops framework. Gated by the same
+	// feature flag as the legacy imported-day-2-ops controller above
+	// so operators opt into both surfaces together.
+	if features.ImportedDay2Ops.Enabled() {
+		if err := plancontrollers.Register(ctx, wrangler, manager); err != nil {
+			logrus.Errorf("failed to register plan.cattle.io controllers: %v", err)
+		}
+	}
 
 	// Register last
 	auth.RegisterLate(ctx, management)

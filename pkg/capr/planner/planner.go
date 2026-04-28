@@ -17,9 +17,11 @@ import (
 	"github.com/moby/locker"
 	"github.com/rancher/channelserver/pkg/model"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	planv1alpha1 "github.com/rancher/rancher/pkg/apis/plan.cattle.io/v1alpha1"
 	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1/plan"
 	"github.com/rancher/rancher/pkg/capr"
+	"github.com/rancher/rancher/pkg/features"
 	capicontrollers "github.com/rancher/rancher/pkg/generated/controllers/cluster.x-k8s.io/v1beta2"
 	mgmtcontrollers "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	ranchercontrollers "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io/v1"
@@ -230,6 +232,37 @@ func (p *Planner) setMachineConditionStatus(clusterPlan *plan.Plan, machineNames
 	return nil
 }
 
+// day2OpsDelegated returns true when the framework's new
+// ClusterPlan-based day-2 ops are responsible for this cluster's
+// snapshot/restore/cert-rotation/encryption-rotation operations. The
+// legacy planner's day-2 ops blocks are skipped for opted-in clusters
+// so the new framework owns the operation lifecycle without a
+// duplicate execution path.
+//
+// Bootstrap and steady-state config reconciliation continue to flow
+// through the planner regardless of opt-in — only the explicit day-2
+// ops slice is delegated.
+//
+// Tolerates missing parent provisioning Cluster (still booting) by
+// treating it as not-delegated; the legacy code path is the safe
+// default during early reconciliation windows.
+func (p *Planner) day2OpsDelegated(cp *rkev1.RKEControlPlane) (bool, error) {
+	if !features.ImportedDay2Ops.Enabled() {
+		return false, nil
+	}
+	if cp == nil || cp.Spec.ClusterName == "" {
+		return false, nil
+	}
+	cluster, err := p.rancherClusterCache.Get(cp.Namespace, cp.Spec.ClusterName)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return cluster.Annotations[planv1alpha1.UseNewDay2OpsAnnotation] == "true", nil
+}
+
 func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlaneStatus) (rkev1.RKEControlPlaneStatus, error) {
 	logrus.Debugf("[planner] rkecluster %s/%s: attempting to lock %s for processing", cp.Namespace, cp.Name, string(cp.UID))
 	p.locker.Lock(string(cp.UID))
@@ -323,20 +356,27 @@ func (p *Planner) Process(cp *rkev1.RKEControlPlane, status rkev1.RKEControlPlan
 		return status, err
 	}
 
-	if status, err = p.createEtcdSnapshot(cp, status, clusterSecretTokens, plan); err != nil {
+	delegated, err := p.day2OpsDelegated(cp)
+	if err != nil {
 		return status, err
 	}
 
-	if status, err = p.restoreEtcdSnapshot(cp, status, clusterSecretTokens, plan, currentVersion); err != nil {
-		return status, err
-	}
+	if !delegated {
+		if status, err = p.createEtcdSnapshot(cp, status, clusterSecretTokens, plan); err != nil {
+			return status, err
+		}
 
-	if status, err = p.rotateCertificates(cp, status, clusterSecretTokens, plan); err != nil {
-		return status, err
-	}
+		if status, err = p.restoreEtcdSnapshot(cp, status, clusterSecretTokens, plan, currentVersion); err != nil {
+			return status, err
+		}
 
-	if status, err = p.rotateEncryptionKeys(cp, status, clusterSecretTokens, plan, releaseData); err != nil {
-		return status, err
+		if status, err = p.rotateCertificates(cp, status, clusterSecretTokens, plan); err != nil {
+			return status, err
+		}
+
+		if status, err = p.rotateEncryptionKeys(cp, status, clusterSecretTokens, plan, releaseData); err != nil {
+			return status, err
+		}
 	}
 
 	// pausing the control plane only affects machine reconciliation: etcd snapshot/restore, encryption key & cert

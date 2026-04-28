@@ -1,0 +1,231 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: clusterplantemplates.plan.cattle.io
+spec:
+  group: plan.cattle.io
+  names:
+    kind: ClusterPlanTemplate
+    listKind: ClusterPlanTemplateList
+    plural: clusterplantemplates
+    shortNames:
+    - cpt
+    singular: clusterplantemplate
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.operation
+      name: Operation
+      type: string
+    - jsonPath: .spec.lifecycle.cancellable
+      name: Cancellable
+      type: boolean
+    - jsonPath: .spec.lifecycle.cancelsOthers
+      name: Cancels
+      type: boolean
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ClusterPlanTemplate is the Go-templated source of a single day-2 operation.
+          One ClusterPlanTemplate exists per built-in operation
+          (etcd-snapshot-create, etcd-snapshot-restore, cert-rotation, ...).
+          Operators may author their own templates.
+
+          At trigger time, the renderer picks the entrypoint matching the cluster's
+          type (capr → RKEControlPlane, caprke2 → RKE2ControlPlane, imported →
+          management.cattle.io/v3.Cluster) and renders Spec.Stages into a
+          ClusterPlan in the cluster's namespace.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ClusterPlanTemplateSpec is the desired state of a ClusterPlanTemplate.
+            properties:
+              defaultImage:
+                description: |-
+                  DefaultImage, when set, is used for any Instruction within the
+                  rendered ClusterPlan that omits its own Image.
+                type: string
+              entrypoints:
+                description: |-
+                  Entrypoints declares which "source-of-truth" object kinds this template
+                  can be rendered against. The renderer picks the first listed entry
+                  whose kind matches the cluster's resolved entrypoint.
+                items:
+                  description: |-
+                    EntrypointRef declares the GVK of a cluster-side "source of truth" object
+                    from which a template is rendered.
+                  properties:
+                    apiVersion:
+                      description: APIVersion is the group/version, e.g. "rke.cattle.io/v1".
+                      minLength: 1
+                      type: string
+                    kind:
+                      description: Kind is the resource kind, e.g. "RKEControlPlane".
+                      minLength: 1
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  type: object
+                minItems: 1
+                type: array
+              lifecycle:
+                description: |-
+                  Lifecycle declares Beacon lock semantics for operations rendered from
+                  this template.
+                properties:
+                  cancellable:
+                    default: false
+                    description: |-
+                      Cancellable=true means an incoming operation marked CancelsOthers may
+                      pre-empt this one while it holds the Beacon.
+                    type: boolean
+                  cancelsOthers:
+                    default: false
+                    description: |-
+                      CancelsOthers=true means rendering this operation may pre-empt a
+                      Cancellable holder of the Beacon.
+                    type: boolean
+                  timeoutSeconds:
+                    default: 3600
+                    description: |-
+                      TimeoutSeconds is the maximum wall-clock time the operation may hold
+                      the Beacon. If exceeded, the framework forcibly clears the Beacon and
+                      marks the operation Failed.
+                    format: int32
+                    minimum: 60
+                    type: integer
+                type: object
+              nodePlanTemplates:
+                description: |-
+                  NodePlanTemplates lists every NodePlanTemplate (cluster-scoped) the
+                  stages of this template may reference. Listed here so that the
+                  builtin controller can validate references and so that a future
+                  validating webhook can statically verify the graph.
+                items:
+                  description: LocalClusterScopedRef references a cluster-scoped object
+                    by name.
+                  properties:
+                    name:
+                      minLength: 1
+                      type: string
+                  required:
+                  - name
+                  type: object
+                type: array
+              operation:
+                description: |-
+                  Operation is the canonical short name (e.g. "etcd-snapshot-create").
+                  Must match the metadata.name for built-in templates.
+                pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$
+                type: string
+              plan:
+                description: |-
+                  Plan is the templated body. Authored as a Go text/template document
+                  that, when rendered, yields YAML for ClusterPlanSpec — at minimum
+                  the `plan:` list of NodePoolPlan entries, and optionally the
+                  cluster-wide files/probes/instructions and inputs.
+                minLength: 1
+                type: string
+            required:
+            - entrypoints
+            - lifecycle
+            - operation
+            - plan
+            type: object
+          status:
+            description: ClusterPlanTemplateStatus is the observed state of a ClusterPlanTemplate.
+            properties:
+              conditions:
+                description: |-
+                  Conditions surface validation results: Ready (template parses),
+                  Validated (entrypoint kinds resolve), Renderable (referenced
+                  NodePlanTemplates exist).
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

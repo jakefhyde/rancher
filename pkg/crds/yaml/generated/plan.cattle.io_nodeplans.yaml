@@ -1,0 +1,340 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: nodeplans.plan.cattle.io
+spec:
+  group: plan.cattle.io
+  names:
+    kind: NodePlan
+    listKind: NodePlanList
+    plural: nodeplans
+    shortNames:
+    - np
+    singular: nodeplan
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          NodePlan is the unit of work executed by a single system-agent on a single
+          node. It carries Files to write, Instructions to run, Probes to evaluate,
+          and Outputs to capture. NodePlan is the source of truth — the legacy
+          rke.cattle.io/machine-plan secret format is a (temporary) wire adapter
+          produced from NodePlanSpec by pkg/clusterplan/wire and consumed by the
+          existing system-agent until system-agents learn to read NodePlan directly
+          (see the registration redesign in the design plan).
+
+          NodePlans usually descend from a ClusterPlan (linked via the
+          plan.cattle.io/clusterplan-name label) but a NodePlan is valid standalone:
+          an operator may create one directly, and the framework treats it as a
+          self-contained unit of work without any required parent.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: NodePlanSpec is the desired on-node state.
+            properties:
+              files:
+                description: Files are written to the node filesystem before Instructions
+                  run.
+                items:
+                  description: File is written by the system-agent to the node filesystem.
+                  properties:
+                    content:
+                      description: |-
+                        Content of the file. May be base64-encoded by the agent transport for
+                        binary safety; templating in the calling layer takes care of encoding.
+                      type: string
+                    drain:
+                      description: |-
+                        Drain=true causes the system-agent to drain the node before applying
+                        the file change. Useful for kubelet config, container runtime config,
+                        and other host-level mutations whose visibility requires a restart.
+                      type: boolean
+                    path:
+                      description: Path is the absolute filesystem path on the node.
+                      minLength: 1
+                      type: string
+                    permissions:
+                      description: Permissions in octal string form, e.g. "0644".
+                      type: string
+                  type: object
+                type: array
+              instructions:
+                description: Instructions are executed in order.
+                items:
+                  description: Instruction is one shell command executed by the system-agent.
+                  properties:
+                    args:
+                      description: Args are arguments passed to Command.
+                      items:
+                        type: string
+                      type: array
+                    command:
+                      description: Command is the executable to run.
+                      minLength: 1
+                      type: string
+                    env:
+                      description: Env is a list of "KEY=VALUE" strings.
+                      items:
+                        type: string
+                      type: array
+                    image:
+                      description: |-
+                        Image, when set, runs the command inside the named container image.
+                        When empty, the command runs on the host.
+                      type: string
+                    name:
+                      description: Name is a human-readable identifier referenced
+                        by Output.Source.
+                      minLength: 1
+                      type: string
+                    saveOutput:
+                      description: |-
+                        SaveOutput causes stdout to be retained by the agent so an Output
+                        declaration can capture it. Will be removed once preserveStdout /
+                        preserveStderr are wired through.
+                      type: boolean
+                    strategy:
+                      description: Strategy controls retries, idempotency, and scheduling.
+                      properties:
+                        failureThreshold:
+                          description: |-
+                            FailureThreshold is the number of consecutive failures after which
+                            the parent NodePlan is marked Failed.
+                          type: integer
+                        periodSeconds:
+                          description: |-
+                            PeriodSeconds, when > 0, runs the instruction on a recurring
+                            schedule rather than once.
+                          type: integer
+                        retryOnStartup:
+                          description: |-
+                            RetryOnStartup re-runs the instruction every time the system-agent
+                            process starts.
+                          type: boolean
+                        retryOnSuccess:
+                          description: |-
+                            Idempotent indicates the instruction may be safely re-run; when
+                            false, an agent restart that interrupts the instruction will mark
+                            the plan Failed rather than re-running.
+                          type: boolean
+                        successThreshold:
+                          description: |-
+                            SuccessThreshold is the number of consecutive successful runs
+                            required before the instruction is considered done.
+                          type: integer
+                        timeoutSeconds:
+                          description: TimeoutSeconds bounds a single execution attempt.
+                          type: integer
+                      type: object
+                  type: object
+                type: array
+              outputs:
+                description: |-
+                  Outputs declare which Instruction stdouts to capture and surface in
+                  Status.Outputs. The capture itself is performed by the agent; the
+                  framework consumes them via Status.
+                items:
+                  description: Output declares a value to surface in NodePlanStatus.Outputs.
+                  properties:
+                    name:
+                      description: Name is the key under which the captured value
+                        is published.
+                      minLength: 1
+                      type: string
+                    persistent:
+                      description: |-
+                        Persistent=true keeps the output across the lifetime of the
+                        NodePlan and (when this NodePlan descends from a ClusterPlan)
+                        promotes it into the parent ClusterPlan's persistent outputs map.
+                      type: boolean
+                    source:
+                      description: |-
+                        Source identifies the producer. The framework recognises the form
+                        "<instructionName>" (capture instruction stdout) and
+                        "<instructionName>:<jsonPath>" (capture and project as JSON).
+                      minLength: 1
+                      type: string
+                  type: object
+                type: array
+              probes:
+                description: |-
+                  Probes are evaluated periodically and gate Instruction execution
+                  according to each instruction's strategy.
+                items:
+                  description: Probe is a periodic readiness check evaluated by the
+                    system-agent.
+                  properties:
+                    httpGetAction:
+                      description: |-
+                        HTTPGetAction defines the HTTP probe. Future kinds (TCPSocket,
+                        Exec) may be added alongside.
+                      properties:
+                        caCert:
+                          description: CACert is a PEM-encoded CA certificate (or
+                            a path on the node).
+                          type: string
+                        clientCert:
+                          description: |-
+                            ClientCert is a PEM-encoded client certificate (or a path on the
+                            node, agent-dependent).
+                          type: string
+                        clientKey:
+                          description: ClientKey is a PEM-encoded client key (or a
+                            path on the node).
+                          type: string
+                        insecure:
+                          description: Insecure skips TLS verification.
+                          type: boolean
+                        url:
+                          description: URL of the probe target.
+                          minLength: 1
+                          type: string
+                      type: object
+                    name:
+                      description: |-
+                        Name identifies the probe and is referenced by Output and by
+                        instruction-status conditions.
+                      minLength: 1
+                      type: string
+                    retryStrategy:
+                      description: |-
+                        RetryStrategy controls evaluation cadence and the success/failure
+                        thresholds that flip the probe's reported status.
+                      properties:
+                        failureThreshold:
+                          description: |-
+                            FailureThreshold is the consecutive failures required to flip the
+                            probe to NotReady.
+                          type: integer
+                        initialDelaySeconds:
+                          description: InitialDelaySeconds delays the first evaluation.
+                          type: integer
+                        successThreshold:
+                          description: |-
+                            SuccessThreshold is the consecutive successes required to flip
+                            the probe to Ready.
+                          type: integer
+                        timeoutSeconds:
+                          description: TimeoutSeconds bounds a single probe attempt.
+                          type: integer
+                      type: object
+                  type: object
+                type: array
+            type: object
+          status:
+            description: NodePlanStatus is the observed state of a NodePlan.
+            properties:
+              conditions:
+                description: Conditions surface fine-grained progress.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+              outputs:
+                additionalProperties:
+                  description: OutputStatus is one captured value.
+                  properties:
+                    persistent:
+                      description: |-
+                        Persistent mirrors Output.Persistent so consumers don't need to
+                        look back at the spec.
+                      type: boolean
+                    value:
+                      description: Value is the captured (and optionally JSONPath-projected)
+                        string.
+                      type: string
+                  type: object
+                description: Outputs holds captured values keyed by Output.Name.
+                type: object
+              phase:
+                description: Phase mirrors the high-level lifecycle.
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

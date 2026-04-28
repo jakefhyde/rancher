@@ -1,0 +1,258 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.1
+  name: etcdsnapshotcreates.plan.cattle.io
+spec:
+  group: plan.cattle.io
+  names:
+    kind: ETCDSnapshotCreate
+    listKind: ETCDSnapshotCreateList
+    plural: etcdsnapshotcreates
+    shortNames:
+    - esc
+    singular: etcdsnapshotcreate
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.clusterRef.name
+      name: Cluster
+      type: string
+    - jsonPath: .status.clusterPlanRef.name
+      name: Plan
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ETCDSnapshotCreate is the per-operation trigger CR for the
+          "etcd-snapshot-create" day-2 operation. Reconciled by
+          pkg/controllers/plan/etcdsnapshot, which selects the per-cluster-type
+          ClusterPlanTemplate (etcd-snapshot-create-{capr,caprke2,imported}),
+          materialises a ClusterPlan from it, and records the resulting
+          ClusterPlan reference in Status.ClusterPlanRef.
+
+          The CR is the single trigger surface for all three cluster types in
+          the new framework. Legacy paths (the
+          RKEControlPlane.Spec.ETCDSnapshotCreate.Generation bump for v2prov
+          clusters) are translated into ETCDSnapshotCreate CRs by
+          pkg/controllers/plan/trigger when the parent cluster is opted-in.
+
+          Once the materialised ClusterPlan reaches a terminal phase the CR
+          itself can be garbage-collected (the Status.ClusterPlanRef remains a
+          useful audit trail until then).
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ETCDSnapshotCreateSpec is the desired state of an ETCDSnapshotCreate.
+            properties:
+              clusterRef:
+                description: ClusterRef identifies the cluster the snapshot will be
+                  taken on.
+                properties:
+                  apiVersion:
+                    description: APIVersion of the cluster object.
+                    minLength: 1
+                    type: string
+                  kind:
+                    description: Kind of the cluster object (e.g. "Cluster").
+                    minLength: 1
+                    type: string
+                  name:
+                    description: Name of the cluster object.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: |-
+                      Namespace of the cluster object. Empty for cluster-scoped clusters
+                      (the imported management.cattle.io/v3.Cluster case).
+                    type: string
+                required:
+                - apiVersion
+                - kind
+                - name
+                type: object
+              name:
+                description: |-
+                  Name is the desired snapshot name. When empty, the framework
+                  generates one of the form "<cluster>-<timestamp>".
+                type: string
+              s3:
+                description: |-
+                  S3, when set, configures S3-backed snapshot upload using the same
+                  shape as rke.cattle.io/v1.ETCDSnapshotS3.
+                properties:
+                  bucket:
+                    description: |-
+                      Bucket is the name of the S3 bucket used for snapshot operations.
+                      If this field is not explicitly set, the 'defaultBucket' value from the referenced CloudCredential will be used.
+                      An empty bucket name will cause a 'failed to initialize S3 client: s3 bucket name was not set' error.
+                    maxLength: 63
+                    nullable: true
+                    type: string
+                  cloudCredentialName:
+                    description: |-
+                      CloudCredentialName is the name of the secret containing the
+                      credentials used to access the S3 bucket.
+                      The secret is expected to have the following keys:
+                      - accessKey [required]
+                      - secretKey [required]
+                      - defaultRegion
+                      - defaultEndpoint
+                      - defaultEndpointCA
+                      - defaultSkipSSLVerify
+                      - defaultBucket
+                      - defaultFolder
+                      Fields set directly in this spec (`ETCDSnapshotS3`) take precedence over the corresponding
+                      values from the CloudCredential secret. This field must be in the format of "namespace:name".
+                    nullable: true
+                    type: string
+                  endpoint:
+                    description: |-
+                      Endpoint is the S3 endpoint used for snapshot operations.
+                      If this field is not explicitly set, the 'defaultEndpoint' value from the referenced CloudCredential will be used.
+                    nullable: true
+                    type: string
+                  endpointCA:
+                    description: |-
+                      EndpointCA is the CA certificate for validating the S3 endpoint.
+                      This can be either a file path (e.g., "/etc/ssl/certs/my-ca.crt")
+                      or the CA certificate content, in base64-encoded or plain PEM format.
+                      If this field is not explicitly set, the 'defaultEndpointCA' value from the referenced CloudCredential will be used.
+                    nullable: true
+                    type: string
+                  folder:
+                    description: |-
+                      Folder is the name of the S3 folder used for snapshot operations.
+                      If this field is not explicitly set, the folder from the referenced CloudCredential will be used.
+                    nullable: true
+                    type: string
+                  region:
+                    description: |-
+                      Region is the S3 region used for snapshot operations. (e.g., "us-east-1").
+                      If this field is not explicitly set, the 'defaultRegion' value from the referenced CloudCredential will be used.
+                    nullable: true
+                    type: string
+                  retention:
+                    description: |-
+                      Retention defines the number of snapshots to retain in the S3 bucket.
+                      Older snapshots beyond this retention count will be deleted.
+                      If this field is not explicitly set, the retention value from the etcd retention will be used.
+                    minimum: 0
+                    nullable: true
+                    type: integer
+                  skipSSLVerify:
+                    description: |-
+                      SkipSSLVerify defines whether TLS certificate verification is disabled.
+                      If this field is not explicitly set, the 'defaultSkipSSLVerify' value
+                      from the referenced CloudCredential will be used.
+                    type: boolean
+                type: object
+            required:
+            - clusterRef
+            type: object
+          status:
+            description: ETCDSnapshotCreateStatus is the observed state of an ETCDSnapshotCreate.
+            properties:
+              clusterPlanRef:
+                description: |-
+                  ClusterPlanRef points at the ClusterPlan materialised for this
+                  trigger, in the same namespace.
+                properties:
+                  name:
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              conditions:
+                description: |-
+                  Conditions surface the trigger's progress: Ready (the trigger is
+                  well-formed and a ClusterPlan exists for it), BeaconHeld
+                  (whether the materialised plan currently holds the Beacon).
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              observedGeneration:
+                description: ObservedGeneration is the .metadata.generation last reconciled.
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

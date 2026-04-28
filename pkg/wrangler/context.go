@@ -23,6 +23,7 @@ import (
 	clusterv3api "github.com/rancher/rancher/pkg/apis/cluster.cattle.io/v3"
 	extv1api "github.com/rancher/rancher/pkg/apis/ext.cattle.io/v1"
 	managementv3api "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	planv1alpha1api "github.com/rancher/rancher/pkg/apis/plan.cattle.io/v1alpha1"
 	projectv3api "github.com/rancher/rancher/pkg/apis/project.cattle.io/v3"
 	provisioningv1api "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	rkev1api "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
@@ -37,6 +38,8 @@ import (
 	fleetv1alpha1 "github.com/rancher/rancher/pkg/generated/controllers/fleet.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io"
 	managementv3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	plancattle "github.com/rancher/rancher/pkg/generated/controllers/plan.cattle.io"
+	plancattlev1alpha1 "github.com/rancher/rancher/pkg/generated/controllers/plan.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/generated/controllers/project.cattle.io"
 	projectv3 "github.com/rancher/rancher/pkg/generated/controllers/project.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io"
@@ -45,8 +48,8 @@ import (
 	rkecontrollers "github.com/rancher/rancher/pkg/generated/controllers/rke.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/generated/controllers/telemetry.cattle.io"
 	telemetryv1 "github.com/rancher/rancher/pkg/generated/controllers/telemetry.cattle.io/v1"
-	"github.com/rancher/rancher/pkg/generated/controllers/upgrade.cattle.io"
-	plancontrolers "github.com/rancher/rancher/pkg/generated/controllers/upgrade.cattle.io/v1"
+	upgradecattle "github.com/rancher/rancher/pkg/generated/controllers/upgrade.cattle.io"
+	upgradev1 "github.com/rancher/rancher/pkg/generated/controllers/upgrade.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/namespace"
 	"github.com/rancher/rancher/pkg/peermanager"
 	"github.com/rancher/rancher/pkg/settings"
@@ -99,6 +102,7 @@ var (
 		managementv3api.AddToScheme,
 		projectv3api.AddToScheme,
 		clusterv3api.AddToScheme,
+		planv1alpha1api.AddToScheme,
 		rkev1api.AddToScheme,
 		scheme.AddToScheme,
 		apiextensionsv1.AddToScheme,
@@ -155,7 +159,8 @@ type Context struct {
 	API                 apiregv1.Interface
 	CRD                 crdv1.Interface
 	K8s                 *namespace.Clientset
-	Plan                plancontrolers.Interface
+	Plan                plancattlev1alpha1.Interface
+	Upgrade             upgradev1.Interface
 	Telemetry           telemetryv1.Interface
 
 	ASL                     accesscontrol.AccessSetLookup
@@ -184,7 +189,8 @@ type Context struct {
 	core         *namespace.WranglerFactory
 	api          *apiregistration.Factory
 	crd          *apiextensions.Factory
-	plan         *upgrade.Factory
+	plan         *plancattle.Factory
+	upgrade      *upgradecattle.Factory
 	telemetry    *telemetry.Factory
 
 	started bool
@@ -346,7 +352,8 @@ func (w *Context) WithAgent(userAgent string) *Context {
 	wContextCopy.Core = wContextCopy.core.WithAgent(userAgent).V1()
 	wContextCopy.API = wContextCopy.api.WithAgent(userAgent).V1()
 	wContextCopy.CRD = wContextCopy.crd.WithAgent(userAgent).V1()
-	wContextCopy.Plan = wContextCopy.plan.WithAgent(userAgent).V1()
+	wContextCopy.Plan = wContextCopy.plan.WithAgent(userAgent).V1alpha1()
+	wContextCopy.Upgrade = wContextCopy.upgrade.WithAgent(userAgent).V1()
 
 	return &wContextCopy
 }
@@ -400,7 +407,12 @@ func NewContext(ctx context.Context, clientConfig clientcmd.ClientConfig, restCo
 		return nil, err
 	}
 
-	plan, err := upgrade.NewFactoryFromConfigWithOptions(restConfig, opts)
+	upgradeFactory, err := upgradecattle.NewFactoryFromConfigWithOptions(restConfig, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	plan, err := plancattle.NewFactoryFromConfigWithOptions(restConfig, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -565,7 +577,8 @@ func NewContext(ctx context.Context, clientConfig clientcmd.ClientConfig, restCo
 		SystemChartsManager:     systemCharts,
 		TunnelAuthorizer:        tunnelAuth,
 		TunnelServer:            tunnelServer,
-		Plan:                    plan.Upgrade().V1(),
+		Plan:                    plan.Plan().V1alpha1(),
+		Upgrade:                 upgradeFactory.Upgrade().V1(),
 		Telemetry:               telemetry.Telemetry().V1(),
 
 		mgmt:         mgmt,
@@ -582,6 +595,7 @@ func NewContext(ctx context.Context, clientConfig clientcmd.ClientConfig, restCo
 		rke:          rke,
 		rbac:         rbac,
 		plan:         plan,
+		upgrade:      upgradeFactory,
 		telemetry:    telemetry,
 	}
 
