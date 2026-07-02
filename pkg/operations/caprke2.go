@@ -35,6 +35,7 @@ import (
 //   - There is no `Spec.DataDirectories.Provisioning` override; the provisioning data dir uses
 //     the standard `/var/lib/rancher/capr` default.
 type CAPRKE2Adapter struct {
+	cluster      *capiv1beta2.Cluster
 	controlPlane *controlplanev1beta2.RKE2ControlPlane
 	clients      *wrangler.CAPIContext
 }
@@ -109,8 +110,14 @@ func (a *CAPRKE2Adapter) GetSupervisorPort(_ *corev1.Secret) string {
 // CAPRAdapter.WaitForRegister — see pkg/operations/capr.go:122-175. Labels are identical because
 // the system-agent's plan-secret labelling is operation-package-agnostic.
 func (a *CAPRKE2Adapter) WaitForRegister() (bool, error) {
-	secretList, err := a.clients.Core.Secret().List(a.controlPlane.Namespace, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("%s=%s", capr.ClusterNameLabel, a.controlPlane.Name),
+	labelSelector := fmt.Sprintf("%s=%s,%s=%s,%s=%s,%s=%s,%s=%s",
+		planv1alpha1.ClusterLifecycleGroup, capiv1beta2.GroupVersion.Group,
+		planv1alpha1.ClusterLifecycleVersion, capiv1beta2.GroupVersion.Version,
+		planv1alpha1.ClusterLifecycleKind, a.cluster.Kind,
+		planv1alpha1.ClusterLifecycleNamespace, a.cluster.Namespace,
+		planv1alpha1.ClusterLifecycleName, a.cluster.Name)
+	secretList, err := a.clients.Core.Secret().List(a.cluster.Namespace, metav1.ListOptions{
+		LabelSelector: labelSelector,
 		FieldSelector: fmt.Sprintf("type=%s", capr.SecretTypeMachinePlan),
 	})
 	if err != nil {
@@ -119,8 +126,8 @@ func (a *CAPRKE2Adapter) WaitForRegister() (bool, error) {
 
 	secrets := secretList.Items
 
-	machines, err := a.clients.CAPI.Machine().Cache().List(a.controlPlane.Namespace, labels.SelectorFromSet(labels.Set{
-		capr.ClusterNameLabel: a.controlPlane.Name,
+	machines, err := a.clients.CAPI.Machine().Cache().List(a.cluster.Namespace, labels.SelectorFromSet(labels.Set{
+		capiv1beta2.ClusterNameLabel: a.cluster.Name,
 	}))
 	if err != nil {
 		return false, err

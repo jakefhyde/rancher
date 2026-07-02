@@ -26,14 +26,20 @@ import (
 // Cluster. The mgmt v3 mirror produced by Turtles is only here to verify the import wiring
 // works; the operations themselves never reference it.
 //
-// This test is gated by V2PROV_TEST_CAPRKE2=true because spinning up the three Turtles-managed
-// CAPI providers (CAPRKE2 control plane, CAPRKE2 bootstrap, CAPI Docker infrastructure) and a
-// Docker-backed cluster on top adds significant time and resource pressure to the v2prov suite.
-// CI does not set the env var so the test no-ops there by default; see
-// `scripts/provisioning-tests` for the install gate.
+// This test is LOCAL-DEV ONLY and gated by V2PROV_TEST_CAPRKE2=true. CI does not set the env
+// var (the provisioning-tests workflow has no CAPRKE2 matrix entry). Local recipe:
+//
+//	make dev-env                     # k3d cluster on the `kind` docker network with docker.sock
+//	# run Rancher locally (dev-scripts/quick, or your GoLand run target)
+//	make install-caprke2-providers   # waits for Rancher/Turtles, then applies the provider set
+//	V2PROV_TEST_CAPRKE2=true go test -v \
+//	  -run '^Test_Operation_SetE_CAPRKE2DockerOperations$' \
+//	  ./tests/v2prov/tests/imported/...
+//
+// See dev-scripts/dev-env and dev-scripts/install-caprke2-providers for the invariants.
 func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
 	if os.Getenv("V2PROV_TEST_CAPRKE2") != "true" {
-		t.Skip("V2PROV_TEST_CAPRKE2 not set; skipping CAPRKE2 + Docker operations test")
+		t.Skip("V2PROV_TEST_CAPRKE2 not set; skipping CAPRKE2 + Docker operations test (local-only)")
 	}
 
 	cs, err := clients.New()

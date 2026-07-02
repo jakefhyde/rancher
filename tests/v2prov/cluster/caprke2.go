@@ -34,10 +34,12 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// rancherAutoImportAnnotation is the annotation Turtles watches on namespaces to decide whether to
-// mirror CAPI clusters in that namespace into Rancher as management.cattle.io/v3 Clusters.
-// Setting this on the namespace is sufficient — no per-cluster opt-in is needed.
-const rancherAutoImportAnnotation = "cluster-api.cattle.io/rancher-auto-import"
+// rancherAutoImportLabel is the LABEL (not annotation — Turtles reads this from
+// obj.GetLabels() in util.ShouldImport, see rancher/turtles/util package) Turtles watches on
+// namespaces (or CAPI Clusters) to decide whether to mirror CAPI clusters in that namespace
+// into Rancher as management.cattle.io/v3 Clusters. Setting this on the namespace is
+// sufficient — no per-cluster opt-in needed.
+const rancherAutoImportLabel = "cluster-api.cattle.io/rancher-auto-import"
 
 // CAPRKE2Provider GVKs used to build the cluster. Pulled into constants so test code doesn't
 // scatter string literals.
@@ -70,6 +72,14 @@ type CAPRKE2Options struct {
 // when CAPRKE2's webhook starts rejecting it. The trailing "+rke2r1" is required by the
 // `(v\d\.\d{2}\.\d+\+rke2r\d)` pattern.
 const defaultRKE2Version = "v1.32.5+rke2r1"
+
+// defaultKindestNodeImage is what CAPD launches for each control-plane machine. Without this,
+// CAPD tries to derive a tag from the RKE2 version — e.g. `kindest/node:v1.32.5_rke2r1` — which
+// is not a published image (kindest publishes plain-K8s tags like `kindest/node:v1.34.0`). The
+// image is only used as the systemd container base; RKE2 installs its own kubelet on top, so the
+// K8s version encoded in the tag does not have to match RKE2's. Matches CAPRKE2's own upstream
+// examples (see cluster-api-provider-rke2/examples/clusterclass/docker/clusterclass-template.yaml).
+const defaultKindestNodeImage = "kindest/node:v1.34.0"
 
 // CAPRKE2Fixture is what the helpers return to the test. The test should
 //   - call WaitForCAPRKE2Ready to block until CAPI + Turtles auto-import are settled,
@@ -116,10 +126,12 @@ func NewCAPRKE2Cluster(cs *clients.Clients, opts CAPRKE2Options) (*CAPRKE2Fixtur
 		if err := cs.Client.Create(context.TODO(), &corev1.Namespace{
 			ObjectMeta: metav1.ObjectMeta{
 				Name: ns,
-				Annotations: map[string]string{
+				Labels: map[string]string{
 					// Tells Turtles to mirror CAPI clusters in this namespace into Rancher as
 					// management.cattle.io/v3 Clusters with ImportedConfig (no provisioning).
-					rancherAutoImportAnnotation: "true",
+					// This MUST be a label, not an annotation: Turtles' import controller
+					// (rancher/turtles/util.ShouldImport) reads obj.GetLabels()[key].
+					rancherAutoImportLabel: "true",
 				},
 			},
 		}); err != nil {
@@ -139,12 +151,15 @@ func NewCAPRKE2Cluster(cs *clients.Clients, opts CAPRKE2Options) (*CAPRKE2Fixtur
 	}
 
 	// 2) DockerMachineTemplate — the per-machine infrastructure template referenced by the
-	//    RKE2ControlPlane.machineTemplate.infrastructureRef. Empty spec is acceptable for the
-	//    Docker provider; defaults give us a kindest/node image at the chosen RKE2 version.
+	//    RKE2ControlPlane.machineTemplate.infrastructureRef. customImage is set explicitly to a
+	//    published kindest/node tag; without it CAPD derives a tag from the RKE2 version and
+	//    ImagePull fails (kindest doesn't publish `_rke2rN` variants).
 	dockerMachineTemplate := newUnstructured(gvkDockerMachineTemplate, ns, name, map[string]any{
 		"spec": map[string]any{
 			"template": map[string]any{
-				"spec": map[string]any{},
+				"spec": map[string]any{
+					"customImage": defaultKindestNodeImage,
+				},
 			},
 		},
 	})
@@ -180,6 +195,39 @@ func NewCAPRKE2Cluster(cs *clients.Clients, opts CAPRKE2Options) (*CAPRKE2Fixtur
 				// Default CNI on RKE2 is canal; keep it explicit so the adapter's Calico-probe
 				// gating (which only fires on cni=calico) reads predictably.
 				"cni": "canal",
+				// Disable RKE2's built-in stub cloud-controller-manager. That component sets
+				// spec.providerID on every Node to `rke2://<name>` as soon as the node registers.
+				// CAPD then tries to set its own `docker://…` providerID on the same Node and the
+				// kube-apiserver rejects the patch — `spec.providerID` is one-shot immutable
+				// ("Forbidden: node updates may not change providerID except from '' to valid").
+				// Without a providerID, DockerMachine.spec.providerID never populates, Machine's
+				// NodeHealthy stays Unknown, and Cluster.Available never flips to True.
+				//
+				// CAPRKE2 maps `disableComponents.kubernetesComponents: [cloudController]` to
+				// `rke2 --disable-cloud-controller` (see cluster-api-provider-rke2/pkg/rke2/
+				// config.go). No effect on Docker-backed clusters beyond letting CAPD own the
+				// providerID slot.
+				"disableComponents": map[string]any{
+					"kubernetesComponents": []any{"cloudController"},
+				},
+				// kube-apiserver args pushed through to the workload cluster.
+				//
+				// anonymous-auth=true undoes RKE2's hardened default (--anonymous-auth=false, part of
+				// its CIS-benchmark defaults) so that /healthz responds 200 unauthenticated. CAPD wires
+				// a kindest/haproxy LB in front of every DockerMachine, and that image's baked-in
+				// haproxy.cfg does `option httpchk GET /healthz` on the backend. With the RKE2 default,
+				// /healthz returns 401, the backend is marked DOWN, and every client that reads the
+				// workload kubeconfig (which points at the LB) sees TLS EOF — CAPRKE2's control-plane
+				// controller then loops forever on "connection to the workload cluster is down" and
+				// the RKE2ControlPlane never transitions to Initialized=True.
+				//
+				// This is a throwaway Docker-backed test cluster with no security posture to preserve,
+				// so opening /healthz to anon is the right trade-off. If we ever need the hardened
+				// default back, the alternative is a `spec.loadBalancer.customHAProxyConfigTemplateRef`
+				// on the DockerCluster pointing at a template that uses `option tcp-check` instead.
+				"kubeAPIServer": map[string]any{
+					"extraArgs": []any{"anonymous-auth=true"},
+				},
 			},
 		},
 	})

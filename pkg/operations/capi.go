@@ -54,6 +54,7 @@ func init() {
 				return nil, fmt.Errorf("converting RKE2ControlPlane %s/%s from unstructured: %w", ustr.GetNamespace(), ustr.GetName(), err)
 			}
 			return &CAPRKE2Adapter{
+				cluster:      cluster,
 				controlPlane: controlPlane,
 				clients:      clients,
 			}, nil
