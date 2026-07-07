@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	capiv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
 // Test_Operation_SetE_CAPRKE2DockerOperations brings up a single-node CAPRKE2 cluster on the CAPI
@@ -90,14 +91,25 @@ func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
 
 	// 1 etcd node → 1 snapshot file. The back-populate watcher mirrors snapshot files into
 	// rkev1.ETCDSnapshot CRs in the CAPI cluster's namespace (= controlPlane namespace).
-	waitForSnapshots(t, cs, fx.ClusterName, snapshotsValidAfter, 1)
+	waitForSnapshots(t, cs, fx.Namespace, fx.ClusterName, snapshotsValidAfter, 1)
 
 	// --- ETCDSnapshotRestore ---
-	// The CAPI Docker provider names its first machine `<cluster>-control-plane-<rand>`; the
-	// machine-plan label `rke.cattle.io/node-name` carries the in-cluster node name, which for
-	// the rke2 init node is conventionally `<machine-name>`. We pass the empty string here to
-	// match any node, because the single-machine cluster only produces one snapshot CR.
-	snapshot := waitForBackpopulatedSnapshot(t, cs, fx.ClusterName, "", snapshotsValidAfter)
+	// The back-populated ETCDSnapshot CR carries `rke.cattle.io/node-name = <CAPI Machine name>`
+	// (for CAPRKE2 the in-cluster node name matches the CAPI Machine name). List the CAPI Machines
+	// scoped to this cluster and use the first one as the init-node identifier — for a
+	// single-node CAPRKE2 cluster there is only one anyway.
+	capiMachines, err := cs.CAPI.Machine().List(fx.Namespace, metav1.ListOptions{
+		LabelSelector: capiv1beta2.ClusterNameLabel + "=" + fx.ClusterName,
+	})
+	if err != nil {
+		t.Fatalf("listing CAPI machines for cluster %s/%s: %v", fx.Namespace, fx.ClusterName, err)
+	}
+	if len(capiMachines.Items) == 0 {
+		t.Fatalf("no CAPI machines found for cluster %s/%s", fx.Namespace, fx.ClusterName)
+	}
+	initMachineName := capiMachines.Items[0].Name
+	t.Logf("using CAPI machine %s as init-node identifier for snapshot lookup", initMachineName)
+	snapshot := waitForBackpopulatedSnapshot(t, cs, fx.Namespace, fx.ClusterName, initMachineName, snapshotsValidAfter)
 	if snapshot.SnapshotFile.Name == "" {
 		t.Fatalf("back-populated snapshot %s has empty SnapshotFile.Name", snapshot.Name)
 	}

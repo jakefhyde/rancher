@@ -108,7 +108,7 @@ func (a *CAPRKE2Adapter) GetSupervisorPort(_ *corev1.Secret) string {
 // WaitForRegister waits for every CAPI Machine in the cluster to have a corresponding
 // machine-plan secret, indicating the system-agent has registered for that machine. Mirrors
 // CAPRAdapter.WaitForRegister — see pkg/operations/capr.go:122-175. Labels are identical because
-// the system-agent's plan-secret labelling is operation-package-agnostic.
+// the system-agent's plan-secret labeling is operation-package-agnostic.
 func (a *CAPRKE2Adapter) WaitForRegister() (bool, error) {
 	labelSelector := fmt.Sprintf("%s=%s,%s=%s,%s=%s,%s=%s,%s=%s",
 		planv1alpha1.ClusterLifecycleGroup, capiv1beta2.GroupVersion.Group,

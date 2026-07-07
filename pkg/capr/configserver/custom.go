@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"regexp"
 	"strings"
 
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
@@ -21,10 +20,6 @@ import (
 const (
 	machineIDHeader = "X-Cattle-Id"
 	headerPrefix    = "X-Cattle-"
-)
-
-var (
-	mgmtNameRegexp = regexp.MustCompile("^(c-[a-z0-9]{5}|local)$")
 )
 
 func (r *RKE2ConfigServer) findMachineByClusterToken(req *http.Request) (*corev1.ObjectReference, error) {
@@ -42,19 +37,18 @@ func (r *RKE2ConfigServer) findMachineByClusterToken(req *http.Request) (*corev1
 	if err != nil {
 		return nil, err
 	}
-
-	data := dataFromHeaders(req)
-
 	if len(tokens) == 0 {
 		return nil, nil
 	}
 
-	imported := false
-	if mgmtNameRegexp.MatchString(tokens[0].Namespace) {
-		imported = true
+	data := dataFromHeaders(req)
+
+	lc, err := ResolveMgmtTokenCaller(r.mgmtClusterCache, r.capiClusterCache, tokens[0].Namespace)
+	if err != nil {
+		return nil, err
 	}
 
-	secretName := machineRequestSecretName(imported, machineID)
+	secretName := machineRequestSecretName(lc.Kind, machineID)
 	secret, err := r.secretsCache.Get(tokens[0].Namespace, secretName)
 	if apierror.IsNotFound(err) {
 		secret, err = r.createSecret(tokens[0].Namespace, secretName, data)
@@ -71,21 +65,24 @@ func (r *RKE2ConfigServer) findMachineByClusterToken(req *http.Request) (*corev1
 	machineNamespace, machineName := secret.Labels[capr.MachineNamespaceLabel], secret.Labels[capr.MachineNameLabel]
 	_ = r.secrets.Delete(secret.Namespace, secret.Name, nil)
 
-	if imported {
+	switch lc.Kind {
+	case KindImported:
 		return &corev1.ObjectReference{
 			APIVersion: v3.SchemeGroupVersion.String(),
 			Kind:       "Node",
 			Namespace:  machineNamespace,
 			Name:       machineName,
 		}, nil
+	case KindCAPINative, KindV2Prov:
+		return &corev1.ObjectReference{
+			APIVersion: capi.GroupVersion.String(),
+			Kind:       "Machine",
+			Namespace:  machineNamespace,
+			Name:       machineName,
+		}, nil
 	}
 
-	return &corev1.ObjectReference{
-		APIVersion: capi.GroupVersion.String(),
-		Kind:       "Machine",
-		Namespace:  machineNamespace,
-		Name:       machineName,
-	}, nil
+	return nil, fmt.Errorf("unknown caller kind %v", lc.Kind)
 }
 
 func (r *RKE2ConfigServer) findMachineByID(machineID, ns string) (*capi.Machine, error) {
@@ -152,11 +149,16 @@ func (r *RKE2ConfigServer) waitReady(secret *corev1.Secret) (*corev1.Secret, err
 	return nil, fmt.Errorf("timeout waiting for %s/%s to be ready", secret.Namespace, secret.Name)
 }
 
-func machineRequestSecretName(imported bool, name string) string {
+func machineRequestSecretName(kind CallerKind, name string) string {
 	hash := sha256.Sum256([]byte(name))
-	prefix := "custom-"
-	if imported {
+	var prefix string
+	switch kind {
+	case KindImported:
 		prefix = "imported-"
+	case KindCAPINative:
+		prefix = "capi-"
+	default:
+		prefix = "custom-"
 	}
 	return prefix + hex.EncodeToString(hash[:])[:12]
 }

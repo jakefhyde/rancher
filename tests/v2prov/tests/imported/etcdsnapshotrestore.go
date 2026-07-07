@@ -20,11 +20,11 @@ import (
 	utilwait "k8s.io/apimachinery/pkg/util/wait"
 )
 
-func waitForSnapshots(t *testing.T, clients *clients.Clients, clusterName string, createdAfter time.Time, desired int) {
+func waitForSnapshots(t *testing.T, clients *clients.Clients, clusterNamespace, clusterName string, createdAfter time.Time, desired int) {
 	t.Helper()
 
 	err := utilwait.PollUntilContextTimeout(clients.Ctx, 5*time.Second, 5*time.Minute, true, func(_ context.Context) (bool, error) {
-		list, err := clients.RKE.ETCDSnapshot().List(clusterName, metav1.ListOptions{
+		list, err := clients.RKE.ETCDSnapshot().List(clusterNamespace, metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("%s=%s", capr.ClusterNameLabel, clusterName),
 		})
 		if err != nil {
@@ -54,12 +54,12 @@ func waitForSnapshots(t *testing.T, clients *clients.Clients, clusterName string
 // the imported cluster, then returns the most recently created one. The snapshotbackpopulate
 // controller writes these CRs into the namespace whose name matches the cluster (cluster-scoped
 // mgmt clusters use namespace == name).
-func waitForBackpopulatedSnapshot(t *testing.T, clients *clients.Clients, clusterName, nodeName string, createdAfter time.Time) *rkev1.ETCDSnapshot {
+func waitForBackpopulatedSnapshot(t *testing.T, clients *clients.Clients, clusterNamespace, clusterName, nodeName string, createdAfter time.Time) *rkev1.ETCDSnapshot {
 	t.Helper()
 
 	var picked *rkev1.ETCDSnapshot
 	err := utilwait.PollUntilContextTimeout(clients.Ctx, 5*time.Second, 5*time.Minute, true, func(_ context.Context) (bool, error) {
-		list, err := clients.RKE.ETCDSnapshot().List(clusterName, metav1.ListOptions{
+		list, err := clients.RKE.ETCDSnapshot().List(clusterNamespace, metav1.ListOptions{
 			LabelSelector: fmt.Sprintf("%s=%s,%s=%s", capr.ClusterNameLabel, clusterName, capr.NodeNameLabel, nodeName),
 		})
 		if err != nil {

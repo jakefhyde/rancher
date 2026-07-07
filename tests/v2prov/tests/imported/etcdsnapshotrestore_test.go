@@ -102,11 +102,11 @@ func runRestoreScenario(
 	saveOp := RunETCDSnapshotSaveOperationTest(t, cs, fx.ns.Name, fx.clusterRef)
 	t.Logf("snapshot save operation %s/%s completed", saveOp.Namespace, saveOp.Name)
 
-	waitForSnapshots(t, cs, fx.mgmtCluster.Name, snapshotsValidAfter, expectedSnapshotCount)
+	waitForSnapshots(t, cs, fx.mgmtCluster.Name, fx.mgmtCluster.Name, snapshotsValidAfter, expectedSnapshotCount)
 
 	// The snapshotbackpopulate controller mirrors downstream ETCDSnapshotFile resources into the
 	// management cluster as rkev1.ETCDSnapshot CRs, in the namespace named for the cluster.
-	snapshot := waitForBackpopulatedSnapshot(t, cs, fx.mgmtCluster.Name, snapshotNodeName, snapshotsValidAfter)
+	snapshot := waitForBackpopulatedSnapshot(t, cs, fx.mgmtCluster.Name, fx.mgmtCluster.Name, snapshotNodeName, snapshotsValidAfter)
 	if snapshot.SnapshotFile.Name == "" {
 		t.Fatalf("back-populated snapshot %s has empty SnapshotFile.Name", snapshot.Name)
 	}
@@ -227,8 +227,8 @@ func Test_Operation_SetD_ImportedETCDSnapshotRestoreLifecycleHook(t *testing.T) 
 	snapshotsValidAfter := time.Now().Add(-30 * time.Second)
 	saveOp := RunETCDSnapshotSaveOperationTest(t, cs, fx.ns.Name, fx.clusterRef)
 	t.Logf("snapshot save operation %s/%s completed", saveOp.Namespace, saveOp.Name)
-	waitForSnapshots(t, cs, fx.mgmtCluster.Name, snapshotsValidAfter, 1)
-	snapshot := waitForBackpopulatedSnapshot(t, cs, fx.mgmtCluster.Name, "imported-init-0", snapshotsValidAfter)
+	waitForSnapshots(t, cs, fx.mgmtCluster.Name, fx.mgmtCluster.Name, snapshotsValidAfter, 1)
+	snapshot := waitForBackpopulatedSnapshot(t, cs, fx.mgmtCluster.Name, fx.mgmtCluster.Name, "imported-init-0", snapshotsValidAfter)
 	if snapshot.SnapshotFile.Name == "" {
 		t.Fatalf("back-populated snapshot %s has empty SnapshotFile.Name", snapshot.Name)
 	}
