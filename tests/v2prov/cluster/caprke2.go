@@ -48,6 +48,8 @@ var (
 	gvkDockerCluster         = schema.GroupVersionKind{Group: "infrastructure.cluster.x-k8s.io", Version: "v1beta2", Kind: "DockerCluster"}
 	gvkDockerMachineTemplate = schema.GroupVersionKind{Group: "infrastructure.cluster.x-k8s.io", Version: "v1beta2", Kind: "DockerMachineTemplate"}
 	gvkRKE2ControlPlane      = schema.GroupVersionKind{Group: "controlplane.cluster.x-k8s.io", Version: "v1beta2", Kind: "RKE2ControlPlane"}
+	gvkRKE2ConfigTemplate    = schema.GroupVersionKind{Group: "bootstrap.cluster.x-k8s.io", Version: "v1beta2", Kind: "RKE2ConfigTemplate"}
+	gvkMachineDeployment     = schema.GroupVersionKind{Group: "cluster.x-k8s.io", Version: "v1beta2", Kind: "MachineDeployment"}
 	gvkMgmtV3Cluster         = schema.GroupVersionKind{Group: "management.cattle.io", Version: "v3", Kind: "Cluster"}
 )
 
@@ -66,6 +68,9 @@ type CAPRKE2Options struct {
 	RKE2Version string
 	// Replicas is the RKE2ControlPlane replica count. Default: 1.
 	Replicas int32
+	// WorkerReplicas is the MachineDeployment replica count for agent (worker-only) nodes. When
+	// 0 no MachineDeployment is created and the cluster is control-plane-only. Default: 0.
+	WorkerReplicas int32
 }
 
 // defaultRKE2Version is the RKE2 release used when the test does not pin a specific one. Bump
@@ -88,6 +93,13 @@ const defaultKindestNodeImage = "kindest/node:v1.34.0"
 type CAPRKE2Fixture struct {
 	Namespace   string
 	ClusterName string
+	// WorkerMachineDeploymentName is the name of the worker MachineDeployment (empty when the
+	// cluster was created with WorkerReplicas == 0). Used by WaitForCAPRKE2Ready to decide
+	// whether to wait for a MachineDeployment to become ready.
+	WorkerMachineDeploymentName string
+	// WorkerReplicas mirrors the CAPRKE2Options value so WaitForCAPRKE2Ready can assert the
+	// expected number of ready worker machines.
+	WorkerReplicas int32
 	// MgmtClusterName is the management.cattle.io/v3 Cluster name once Turtles auto-imports the
 	// CAPI cluster. Populated by WaitForCAPRKE2Ready; the empty string before then.
 	MgmtClusterName string
@@ -255,7 +267,88 @@ func NewCAPRKE2Cluster(cs *clients.Clients, opts CAPRKE2Options) (*CAPRKE2Fixtur
 		return nil, fmt.Errorf("creating Cluster %s/%s: %w", ns, name, err)
 	}
 
-	return &CAPRKE2Fixture{Namespace: ns, ClusterName: name}, nil
+	fx := &CAPRKE2Fixture{Namespace: ns, ClusterName: name, WorkerReplicas: opts.WorkerReplicas}
+
+	if opts.WorkerReplicas > 0 {
+		workerName := name + "-workers"
+
+		// 5) Worker DockerMachineTemplate — same kindest/node base as the control-plane machines.
+		//    A separate template (rather than reusing the CP one) keeps InfrastructureRef churn on
+		//    the MachineDeployment independent of RKE2ControlPlane rollouts, matching CAPRKE2's
+		//    upstream docker/cluster-template.yaml layout.
+		workerDMT := newUnstructured(gvkDockerMachineTemplate, ns, workerName, map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"customImage": defaultKindestNodeImage,
+					},
+				},
+			},
+		})
+		if err := cs.Client.Create(context.TODO(), workerDMT); err != nil {
+			return nil, fmt.Errorf("creating worker DockerMachineTemplate %s/%s: %w", ns, workerName, err)
+		}
+
+		// 6) RKE2ConfigTemplate — agent-only bootstrap config. An empty agentConfig block is the
+		//    CAPRKE2 idiom for "default agent"; the rke2 install script + join token are wired up
+		//    by the CAPRKE2 bootstrap controller from the RKE2ControlPlane's server config.
+		rke2ConfigTemplate := newUnstructured(gvkRKE2ConfigTemplate, ns, workerName, map[string]any{
+			"spec": map[string]any{
+				"template": map[string]any{
+					"spec": map[string]any{
+						"agentConfig": map[string]any{},
+					},
+				},
+			},
+		})
+		if err := cs.Client.Create(context.TODO(), rke2ConfigTemplate); err != nil {
+			return nil, fmt.Errorf("creating RKE2ConfigTemplate %s/%s: %w", ns, workerName, err)
+		}
+
+		// 7) MachineDeployment — worker pool. Selector must match a label CAPI stamps on machine
+		//    templates for this cluster (cluster.x-k8s.io/cluster-name), otherwise
+		//    MachineDeployment.status.readyReplicas never converges.
+		machineDeployment := newUnstructured(gvkMachineDeployment, ns, workerName, map[string]any{
+			"spec": map[string]any{
+				"clusterName": name,
+				"replicas":    opts.WorkerReplicas,
+				"selector": map[string]any{
+					"matchLabels": map[string]any{
+						"cluster.x-k8s.io/cluster-name": name,
+					},
+				},
+				"template": map[string]any{
+					"metadata": map[string]any{
+						"labels": map[string]any{
+							"cluster.x-k8s.io/cluster-name": name,
+						},
+					},
+					"spec": map[string]any{
+						"version":     opts.RKE2Version,
+						"clusterName": name,
+						"bootstrap": map[string]any{
+							"configRef": map[string]any{
+								"apiGroup": gvkRKE2ConfigTemplate.Group,
+								"kind":     gvkRKE2ConfigTemplate.Kind,
+								"name":     workerName,
+							},
+						},
+						"infrastructureRef": map[string]any{
+							"apiGroup": gvkDockerMachineTemplate.Group,
+							"kind":     gvkDockerMachineTemplate.Kind,
+							"name":     workerName,
+						},
+					},
+				},
+			},
+		})
+		if err := cs.Client.Create(context.TODO(), machineDeployment); err != nil {
+			return nil, fmt.Errorf("creating MachineDeployment %s/%s: %w", ns, workerName, err)
+		}
+		fx.WorkerMachineDeploymentName = workerName
+	}
+
+	return fx, nil
 }
 
 // WaitForCAPRKE2Ready polls the CAPI Cluster until its control plane is initialized and ready,
@@ -288,6 +381,30 @@ func WaitForCAPRKE2Ready(t *testing.T, cs *clients.Clients, fx *CAPRKE2Fixture) 
 		t.Fatalf("timed out waiting for CAPI Cluster %s/%s initialization (controlPlaneInitialized+infrastructureProvisioned): %v", fx.Namespace, fx.ClusterName, err)
 	}
 	t.Logf("CAPI Cluster %s/%s: control plane + infrastructure ready", fx.Namespace, fx.ClusterName)
+
+	// 1b) Worker MachineDeployment (if any): wait for status.readyReplicas to match the desired
+	//     replica count. The MachineDeployment is a plain CAPI object, so we can use the typed
+	//     CAPI client directly.
+	if fx.WorkerMachineDeploymentName != "" {
+		err = utilwait.PollUntilContextTimeout(cs.Ctx, 10*time.Second, 30*time.Minute, true, func(ctx context.Context) (bool, error) {
+			md, err := cs.CAPI.MachineDeployment().Get(fx.Namespace, fx.WorkerMachineDeploymentName, metav1.GetOptions{})
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					return false, nil
+				}
+				return false, err
+			}
+			if md.Status.ReadyReplicas == nil {
+				return false, nil
+			}
+			return *md.Status.ReadyReplicas == fx.WorkerReplicas, nil
+		})
+		if err != nil {
+			t.Fatalf("timed out waiting for worker MachineDeployment %s/%s to reach readyReplicas=%d: %v",
+				fx.Namespace, fx.WorkerMachineDeploymentName, fx.WorkerReplicas, err)
+		}
+		t.Logf("worker MachineDeployment %s/%s: %d replicas ready", fx.Namespace, fx.WorkerMachineDeploymentName, fx.WorkerReplicas)
+	}
 
 	// 2) Turtles auto-import: poll for a management.cattle.io/v3 Cluster whose
 	//    `clusterapi.cluster.x-k8s.io/owned-by` (or similar) annotation references our CAPI

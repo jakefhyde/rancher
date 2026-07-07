@@ -17,28 +17,69 @@ import (
 	capiv1beta2 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 )
 
-// Test_Operation_SetE_CAPRKE2DockerOperations brings up a single-node CAPRKE2 cluster on the CAPI
-// Docker infrastructure provider, lets Turtles auto-import it into Rancher as a v3 Cluster, then
-// walks all three operations (ETCDSnapshotSave → ETCDSnapshotRestore → EncryptionKeyRotation)
-// against the CAPI Cluster — NOT the auto-imported v3 cluster.
+// The four Test_Operation_SetE_CAPRKE2Docker* tests below exercise the same operations
+// (ETCDSnapshotSave → ETCDSnapshotRestore → EncryptionKeyRotation) against progressively larger
+// CAPRKE2 topologies:
 //
-// The CAPRKE2 adapter is registered in pkg/operations/capi.go for the
-// `cluster.x-k8s.io/v1beta2 Cluster` GVK, so the operation's `ClusterRef` must point at the CAPI
-// Cluster. The mgmt v3 mirror produced by Turtles is only here to verify the import wiring
-// works; the operations themselves never reference it.
+//   - SingleServer      — 1 control-plane, 0 workers (smallest smoke)
+//   - OneServerOneAgent — 1 control-plane, 1 worker  (mixed roles, minimum for MachineDeployment)
+//   - ThreeServers      — 3 control-planes, 0 workers (multi-etcd, tests quorum during restore)
+//   - ThreeServersThreeAgents — 3+3 (full-shape stress)
 //
-// This test is LOCAL-DEV ONLY and gated by V2PROV_TEST_CAPRKE2=true. CI does not set the env
+// Each test creates a fresh CAPI Docker cluster, lets Turtles auto-import it, and then walks the
+// operation sequence. The CAPRKE2 adapter is registered in pkg/operations/capi.go for the
+// `cluster.x-k8s.io/v1beta2 Cluster` GVK, so operation ClusterRefs point at the CAPI Cluster —
+// NOT the mgmt v3 mirror.
+//
+// All four tests are LOCAL-DEV ONLY and gated by V2PROV_TEST_CAPRKE2=true. CI does not set the env
 // var (the provisioning-tests workflow has no CAPRKE2 matrix entry). Local recipe:
 //
 //	make dev-env                     # k3d cluster on the `kind` docker network with docker.sock
 //	# run Rancher locally (dev-scripts/quick, or your GoLand run target)
 //	make install-caprke2-providers   # waits for Rancher/Turtles, then applies the provider set
 //	V2PROV_TEST_CAPRKE2=true go test -v \
-//	  -run '^Test_Operation_SetE_CAPRKE2DockerOperations$' \
+//	  -run '^Test_Operation_SetE_CAPRKE2Docker' \
 //	  ./tests/v2prov/tests/imported/...
 //
 // See dev-scripts/dev-env and dev-scripts/install-caprke2-providers for the invariants.
+
+// Test_Operation_SetE_CAPRKE2DockerOperations is the historical single-server smoke test. Kept
+// as the smallest topology for fast local iteration.
 func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
+	runCAPRKE2OperationsTest(t, cluster.CAPRKE2Options{
+		NamePrefix: "v2prov-caprke2",
+		Replicas:   1,
+	})
+}
+
+func Test_Operation_SetE_CAPRKE2DockerOperations_OneServerOneAgent(t *testing.T) {
+	runCAPRKE2OperationsTest(t, cluster.CAPRKE2Options{
+		NamePrefix:     "v2prov-caprke2-1s1a",
+		Replicas:       1,
+		WorkerReplicas: 1,
+	})
+}
+
+func Test_Operation_SetE_CAPRKE2DockerOperations_ThreeServers(t *testing.T) {
+	runCAPRKE2OperationsTest(t, cluster.CAPRKE2Options{
+		NamePrefix: "v2prov-caprke2-3s",
+		Replicas:   3,
+	})
+}
+
+func Test_Operation_SetE_CAPRKE2DockerOperations_ThreeServersThreeAgents(t *testing.T) {
+	runCAPRKE2OperationsTest(t, cluster.CAPRKE2Options{
+		NamePrefix:     "v2prov-caprke2-3s3a",
+		Replicas:       3,
+		WorkerReplicas: 3,
+	})
+}
+
+// runCAPRKE2OperationsTest brings up a CAPRKE2 cluster with the supplied topology, then walks the
+// three operations (save → restore → encryption-key rotation). The proof-of-restore check writes a
+// ConfigMap to the downstream cluster before the save, deletes it after, and asserts it comes back
+// after the restore.
+func runCAPRKE2OperationsTest(t *testing.T, opts cluster.CAPRKE2Options) {
 	if os.Getenv("V2PROV_TEST_CAPRKE2") != "true" {
 		t.Skip("V2PROV_TEST_CAPRKE2 not set; skipping CAPRKE2 + Docker operations test (local-only)")
 	}
@@ -49,19 +90,15 @@ func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
 	}
 	defer cs.Close()
 
-	// Single all-roles RKE2 control-plane node. Keeps the cluster shape minimal and avoids
-	// MachineDeployment / worker pool complexity for the smoke test.
-	fx, err := cluster.NewCAPRKE2Cluster(cs, cluster.CAPRKE2Options{
-		NamePrefix: "v2prov-caprke2",
-		Replicas:   1,
-	})
+	fx, err := cluster.NewCAPRKE2Cluster(cs, opts)
 	if err != nil {
 		t.Fatalf("creating CAPRKE2 cluster: %v", err)
 	}
 	cluster.WaitForCAPRKE2Ready(t, cs, fx)
 
 	capiClusterRef := fx.CAPIClusterRef()
-	t.Logf("CAPI cluster ready: namespace=%s name=%s mgmtV3Name=%s", fx.Namespace, fx.ClusterName, fx.MgmtClusterName)
+	t.Logf("CAPI cluster ready: namespace=%s name=%s mgmtV3Name=%s controlPlaneReplicas=%d workerReplicas=%d",
+		fx.Namespace, fx.ClusterName, fx.MgmtClusterName, opts.Replicas, opts.WorkerReplicas)
 
 	// Downstream client used for the configmap proof-of-restore. Built once from the CAPI
 	// kubeconfig secret; survives restore so long as the API server returns within our poll window.
@@ -71,11 +108,8 @@ func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
 	}
 
 	// --- ETCDSnapshotSave ---
-	// First operation: plain snapshot save. We also capture the cutoff time so the
-	// back-populate wait later filters out any pre-existing snapshot.
 	cm := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			// Random suffix avoids collisions when the test re-runs against a shared cluster.
 			Name:      "caprke2-restore-cm-" + strings.ToLower(name.Hex(time.Now().String(), 10)),
 			Namespace: "default",
 		},
@@ -89,25 +123,15 @@ func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
 	saveOp := RunETCDSnapshotSaveOperationTest(t, cs, fx.Namespace, capiClusterRef)
 	t.Logf("snapshot save operation %s/%s completed", saveOp.Namespace, saveOp.Name)
 
-	// 1 etcd node → 1 snapshot file. The back-populate watcher mirrors snapshot files into
-	// rkev1.ETCDSnapshot CRs in the CAPI cluster's namespace (= controlPlane namespace).
-	waitForSnapshots(t, cs, fx.Namespace, fx.ClusterName, snapshotsValidAfter, 1)
+	// One snapshot file per etcd (control-plane) node. Workers do not run etcd.
+	waitForSnapshots(t, cs, fx.Namespace, fx.ClusterName, snapshotsValidAfter, int(opts.Replicas))
 
 	// --- ETCDSnapshotRestore ---
-	// The back-populated ETCDSnapshot CR carries `rke.cattle.io/node-name = <CAPI Machine name>`
-	// (for CAPRKE2 the in-cluster node name matches the CAPI Machine name). List the CAPI Machines
-	// scoped to this cluster and use the first one as the init-node identifier — for a
-	// single-node CAPRKE2 cluster there is only one anyway.
-	capiMachines, err := cs.CAPI.Machine().List(fx.Namespace, metav1.ListOptions{
-		LabelSelector: capiv1beta2.ClusterNameLabel + "=" + fx.ClusterName,
-	})
-	if err != nil {
-		t.Fatalf("listing CAPI machines for cluster %s/%s: %v", fx.Namespace, fx.ClusterName, err)
-	}
-	if len(capiMachines.Items) == 0 {
-		t.Fatalf("no CAPI machines found for cluster %s/%s", fx.Namespace, fx.ClusterName)
-	}
-	initMachineName := capiMachines.Items[0].Name
+	// Snapshots are labeled `rke.cattle.io/node-name = <CAPI Machine name>` (for CAPRKE2 the
+	// in-cluster node name matches the CAPI Machine name). List the CAPI Machines carrying the
+	// control-plane label and use the first as the init-node identifier. Restore replays from a
+	// single etcd node's snapshot, so any one control-plane machine is a valid pick.
+	initMachineName := pickCAPRKE2InitMachineName(t, cs, fx)
 	t.Logf("using CAPI machine %s as init-node identifier for snapshot lookup", initMachineName)
 	snapshot := waitForBackpopulatedSnapshot(t, cs, fx.Namespace, fx.ClusterName, initMachineName, snapshotsValidAfter)
 	if snapshot.SnapshotFile.Name == "" {
@@ -155,4 +179,21 @@ func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
 	ekrOp := RunEncryptionKeyRotationOperationTest(t, cs, fx.Namespace, capiClusterRef)
 	t.Logf("encryption key rotation operation %s/%s completed", ekrOp.Namespace, ekrOp.Name)
 	assert.Equal(t, opv1alpha1.OperationPhaseSucceeded, ekrOp.Status.Phase)
+}
+
+// pickCAPRKE2InitMachineName returns the name of a control-plane CAPI Machine in the cluster —
+// the arbitrary "first" one, which is stable enough for a single-run test. Fails the test if no
+// control-plane machine is found.
+func pickCAPRKE2InitMachineName(t *testing.T, cs *clients.Clients, fx *cluster.CAPRKE2Fixture) string {
+	t.Helper()
+	machines, err := cs.CAPI.Machine().List(fx.Namespace, metav1.ListOptions{
+		LabelSelector: capiv1beta2.ClusterNameLabel + "=" + fx.ClusterName + "," + capiv1beta2.MachineControlPlaneLabel,
+	})
+	if err != nil {
+		t.Fatalf("listing CAPI control-plane machines for cluster %s/%s: %v", fx.Namespace, fx.ClusterName, err)
+	}
+	if len(machines.Items) == 0 {
+		t.Fatalf("no CAPI control-plane machines found for cluster %s/%s", fx.Namespace, fx.ClusterName)
+	}
+	return machines.Items[0].Name
 }
