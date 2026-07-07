@@ -3,6 +3,7 @@ package imported
 import (
 	"context"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -47,8 +48,9 @@ import (
 // as the smallest topology for fast local iteration.
 func Test_Operation_SetE_CAPRKE2DockerOperations(t *testing.T) {
 	runCAPRKE2OperationsTest(t, cluster.CAPRKE2Options{
-		NamePrefix: "v2prov-caprke2",
-		Replicas:   1,
+		NamePrefix:          "v2prov-caprke2",
+		Replicas:            1,
+		UseSnapshotFileName: true,
 	})
 }
 
@@ -57,6 +59,7 @@ func Test_Operation_SetE_CAPRKE2DockerOperations_OneServerOneAgent(t *testing.T)
 		NamePrefix:     "v2prov-caprke2-1s1a",
 		Replicas:       1,
 		WorkerReplicas: 1,
+		UseSnapshotFileName: true,
 	})
 }
 
@@ -144,8 +147,14 @@ func runCAPRKE2OperationsTest(t *testing.T, opts cluster.CAPRKE2Options) {
 		t.Fatalf("deleting proof-of-restore configmap %s: %v", cm.Name, err)
 	}
 
-	restoreOp := RunETCDSnapshotRestoreOperationTest(t, cs, fx.Namespace, snapshot.SnapshotFile.Name, capiClusterRef)
-	t.Logf("snapshot restore operation %s/%s completed", restoreOp.Namespace, restoreOp.Name)
+	// Single-server CAPRKE2 clusters restore against the raw on-disk snapshot file name;
+	// multi-node clusters restore against the ETCDSnapshot CR name. See CAPRKE2Options.UseSnapshotFileName.
+	snapshotRef := snapshot.Name
+	if opts.UseSnapshotFileName {
+		snapshotRef = snapshot.SnapshotFile.Name
+	}
+	restoreOp := RunETCDSnapshotRestoreOperationTest(t, cs, fx.Namespace, snapshotRef, capiClusterRef)
+	t.Logf("snapshot restore operation %s/%s completed (snapshotRef=%s)", restoreOp.Namespace, restoreOp.Name, snapshotRef)
 
 	// Poll the configmap back into existence. The apiserver bounces during a restore so the first
 	// few Get calls may transiently fail before settling.
@@ -181,9 +190,10 @@ func runCAPRKE2OperationsTest(t *testing.T, opts cluster.CAPRKE2Options) {
 	assert.Equal(t, opv1alpha1.OperationPhaseSucceeded, ekrOp.Status.Phase)
 }
 
-// pickCAPRKE2InitMachineName returns the name of a control-plane CAPI Machine in the cluster —
-// the arbitrary "first" one, which is stable enough for a single-run test. Fails the test if no
-// control-plane machine is found.
+// pickCAPRKE2InitMachineName returns the name of the newest control-plane CAPI Machine in the
+// cluster. "Newest" matters after restore/EKR churn: earlier machines may have been rolled and
+// their snapshot CRs may no longer exist, so picking the freshest one gives the most reliable
+// snapshot lookup. Fails the test if no control-plane machine is found.
 func pickCAPRKE2InitMachineName(t *testing.T, cs *clients.Clients, fx *cluster.CAPRKE2Fixture) string {
 	t.Helper()
 	machines, err := cs.CAPI.Machine().List(fx.Namespace, metav1.ListOptions{
@@ -195,5 +205,8 @@ func pickCAPRKE2InitMachineName(t *testing.T, cs *clients.Clients, fx *cluster.C
 	if len(machines.Items) == 0 {
 		t.Fatalf("no CAPI control-plane machines found for cluster %s/%s", fx.Namespace, fx.ClusterName)
 	}
+	sort.Slice(machines.Items, func(i, j int) bool {
+		return machines.Items[i].CreationTimestamp.After(machines.Items[j].CreationTimestamp.Time)
+	})
 	return machines.Items[0].Name
 }
