@@ -63,6 +63,14 @@ type RKE2ConfigServer struct {
 	capiAvailable bool
 }
 
+type SecretClientGetter struct {
+	secretsClient corecontrollers.SecretClient
+}
+
+func (s SecretClientGetter) Get(namespace, name string) (*corev1.Secret, error) {
+	return s.secretsClient.Get(namespace, name, metav1.GetOptions{})
+}
+
 func New(clients *wrangler.Context) *RKE2ConfigServer {
 	clients.Core.Secret().Cache().AddIndexer(tokenIndex, func(obj *corev1.Secret) ([]string, error) {
 		if obj.Type == corev1.SecretTypeServiceAccountToken {
@@ -74,7 +82,11 @@ func New(clients *wrangler.Context) *RKE2ConfigServer {
 
 	clients.Mgmt.ClusterRegistrationToken().Cache().AddIndexer(tokenIndex,
 		func(obj *v3.ClusterRegistrationToken) ([]string, error) {
-			current, previous, err := crt.GetTokensFromSecret(clients.Core.Secret().Cache(), obj)
+			var sg crt.SecretGetter = clients.Core.Secret().Cache()
+			if !clients.Core.Secret().Informer().HasSynced() {
+				sg = SecretClientGetter{clients.Core.Secret()}
+			}
+			current, previous, err := crt.GetTokensFromSecret(sg, obj)
 			if err != nil {
 				logrus.Warnf("failed to resolve CRT token for %s/%s: %v", obj.Namespace, obj.Name, err)
 				return nil, nil

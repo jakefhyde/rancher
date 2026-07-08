@@ -80,6 +80,20 @@ func ResolveMgmtTokenCaller(
 		return nil, err
 	}
 
+	// v2prov clusters (custom + node-driver) have a mgmt cluster *shell* stamped with the
+	// `provisioning.cattle.io/administrated=true` annotation. The real state lives on the
+	// provisioning.cattle.io/Cluster, and downstream handlers (getCAPICluster / createMachine)
+	// navigate mgmt shell → provv1.Cluster → CAPI cluster in fleet-default. Classify as
+	// KindV2Prov so onSecretChange falls through to that path rather than mistakenly running the
+	// imported RKE2/K3s (mgmt v3 Node) handler.
+	if mgmtCluster.Annotations["provisioning.cattle.io/administrated"] == "true" {
+		return &LifecycleContext{
+			Kind:            KindV2Prov,
+			TargetNamespace: tokenNamespace,
+			MgmtCluster:     mgmtCluster,
+		}, nil
+	}
+
 	ownerName := mgmtCluster.Labels[capr.CAPIClusterOwnerLabel]
 	ownerNS := mgmtCluster.Labels[capr.CAPIClusterOwnerNSLabel]
 
