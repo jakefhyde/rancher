@@ -18,17 +18,21 @@ const (
 	//
 	BeaconDelegateLabel = "plan.cattle.io/delegate"
 
-	ClusterLifecycleGroup     = "plan.cattle.io/cluster-group"
-	ClusterLifecycleVersion   = "plan.cattle.io/cluster-version"
-	ClusterLifecycleKind      = "plan.cattle.io/cluster-kind"
-	ClusterLifecycleNamespace = "plan.cattle.io/cluster-namespace"
-	ClusterLifecycleName      = "plan.cattle.io/cluster-name"
+	// The lifecycle labels identify the cluster and machine objects that own a plan secret
+	// (or a downstream Node). Only Group + Kind + Name are stamped:
+	//   - Version is omitted because a GroupKind uniquely identifies a resource; the API server
+	//     serves whichever version it stores in when a caller uses a discovery-mapped client.
+	//   - Namespace is omitted deliberately — the caller's own context namespace is authoritative
+	//     for resolving the reference. Encoding the namespace in a label would let a plan-secret
+	//     value point at a resource in a different namespace than the secret itself, which is a
+	//     cross-tenant spoofing vector.
+	ClusterLifecycleGroup = "plan.cattle.io/cluster-group"
+	ClusterLifecycleKind  = "plan.cattle.io/cluster-kind"
+	ClusterLifecycleName  = "plan.cattle.io/cluster-name"
 
-	MachineLifecycleGroup     = "plan.cattle.io/machine-group"
-	MachineLifecycleVersion   = "plan.cattle.io/machine-version"
-	MachineLifecycleKind      = "plan.cattle.io/machine-kind"
-	MachineLifecycleNamespace = "plan.cattle.io/machine-namespace"
-	MachineLifecycleName      = "plan.cattle.io/machine-name"
+	MachineLifecycleGroup = "plan.cattle.io/machine-group"
+	MachineLifecycleKind  = "plan.cattle.io/machine-kind"
+	MachineLifecycleName  = "plan.cattle.io/machine-name"
 )
 
 // Phase hook label prefixes are the shared "<phase>.phase.hook.operation.cattle.io/" namespace used
@@ -110,76 +114,90 @@ func HasActiveLifecycleHook(obj metav1.Object) bool {
 	return false
 }
 
+// ObjToMachineLifecycleLabels returns the three-key lifecycle-label map that identifies a machine
+// object. Kind + Group are read from the object's TypeMeta; cache-fetched objects typically have
+// empty TypeMeta and callers must repopulate it before calling this.
 func ObjToMachineLifecycleLabels(obj runtime.Object) (map[string]string, error) {
-	labels := make(map[string]string, 5)
-
 	metaObj, err := meta.Accessor(obj)
 	if err != nil {
 		return nil, err
 	}
-
 	gvk := obj.GetObjectKind().GroupVersionKind()
-
-	labels[MachineLifecycleGroup] = gvk.Group
-
 	return map[string]string{
-		MachineLifecycleGroup:     gvk.Group,
-		MachineLifecycleVersion:   gvk.Version,
-		MachineLifecycleKind:      gvk.Kind,
-		MachineLifecycleName:      metaObj.GetName(),
-		MachineLifecycleNamespace: metaObj.GetNamespace(),
+		MachineLifecycleGroup: gvk.Group,
+		MachineLifecycleKind:  gvk.Kind,
+		MachineLifecycleName:  metaObj.GetName(),
 	}, nil
 }
 
+// ObjToClusterLifecycleLabels returns the three-key lifecycle-label map that identifies a cluster
+// object. See ObjToMachineLifecycleLabels for the TypeMeta caveat.
 func ObjToClusterLifecycleLabels(obj runtime.Object) (map[string]string, error) {
-	labels := make(map[string]string, 5)
-
 	metaObj, err := meta.Accessor(obj)
 	if err != nil {
 		return nil, err
 	}
-
 	gvk := obj.GetObjectKind().GroupVersionKind()
-
-	labels[ClusterLifecycleGroup] = gvk.Group
-
 	return map[string]string{
-		ClusterLifecycleGroup:     gvk.Group,
-		ClusterLifecycleVersion:   gvk.Version,
-		ClusterLifecycleKind:      gvk.Kind,
-		ClusterLifecycleName:      metaObj.GetName(),
-		ClusterLifecycleNamespace: metaObj.GetNamespace(),
+		ClusterLifecycleGroup: gvk.Group,
+		ClusterLifecycleKind:  gvk.Kind,
+		ClusterLifecycleName:  metaObj.GetName(),
 	}, nil
 }
 
+// HasMachineLifecycleLabels reports whether obj carries a complete machine-lifecycle label triple.
 func HasMachineLifecycleLabels(obj metav1.Object) bool {
 	labels := obj.GetLabels()
 	if labels == nil {
 		return false
 	}
-
-	group := labels[MachineLifecycleGroup]
-	if group == "" {
-		return false
-	}
-	version := labels[MachineLifecycleVersion]
-	if version == "" {
-		return false
-	}
-	kind := labels[MachineLifecycleKind]
-	if kind == "" {
-		return false
-	}
-	// theoretically could be a non-namespaced resource, but in practice this doesn't exist
-	namespace := labels[MachineLifecycleNamespace]
-	if namespace == "" {
-		return false
-	}
-	name := labels[MachineLifecycleName]
-	return name != ""
+	return labels[MachineLifecycleGroup] != "" &&
+		labels[MachineLifecycleKind] != "" &&
+		labels[MachineLifecycleName] != ""
 }
 
-func MachineLifecycleLabelsToObjectReference(obj metav1.Object) (*corev1.ObjectReference, error) {
+// HasClusterLifecycleLabels reports whether obj carries a complete cluster-lifecycle label triple.
+func HasClusterLifecycleLabels(obj metav1.Object) bool {
+	labels := obj.GetLabels()
+	if labels == nil {
+		return false
+	}
+	return labels[ClusterLifecycleGroup] != "" &&
+		labels[ClusterLifecycleKind] != "" &&
+		labels[ClusterLifecycleName] != ""
+}
+
+// ResolveKindStorageVersion asks the discovery-backed RESTMapper for the storage-served
+// (group, version, kind) triple and the scope of the given GroupKind. Callers use this to turn
+// the label-carried (Group, Kind) into the full GVK that dynamic clients require.
+func ResolveKindStorageVersion(mapper meta.RESTMapper, gk schema.GroupKind) (schema.GroupVersionKind, meta.RESTScope, error) {
+	mapping, err := mapper.RESTMapping(gk)
+	if err != nil {
+		return schema.GroupVersionKind{}, nil, err
+	}
+	return mapping.GroupVersionKind, mapping.Scope, nil
+}
+
+// MachineLifecycleLabelsToObjectReference parses the machine-lifecycle labels on obj into an
+// ObjectReference. The Namespace field of the returned reference is ALWAYS contextNamespace —
+// the caller supplies its own authoritative namespace; this is what prevents cross-namespace
+// spoofing through label values. The APIVersion is resolved from the labelled Group via the
+// RESTMapper.
+func MachineLifecycleLabelsToObjectReference(obj metav1.Object, contextNamespace string, mapper meta.RESTMapper) (*corev1.ObjectReference, error) {
+	return lifecycleLabelsToObjectReference(obj, contextNamespace, mapper,
+		MachineLifecycleGroup, MachineLifecycleKind, MachineLifecycleName, "machine")
+}
+
+// ClusterLifecycleLabelsToObjectReference is the cluster-lifecycle analogue of
+// MachineLifecycleLabelsToObjectReference. When the resolved scope is Root (cluster-scoped —
+// e.g. management.cattle.io/v3 Cluster) the returned reference has Namespace = "" regardless of
+// contextNamespace.
+func ClusterLifecycleLabelsToObjectReference(obj metav1.Object, contextNamespace string, mapper meta.RESTMapper) (*corev1.ObjectReference, error) {
+	return lifecycleLabelsToObjectReference(obj, contextNamespace, mapper,
+		ClusterLifecycleGroup, ClusterLifecycleKind, ClusterLifecycleName, "cluster")
+}
+
+func lifecycleLabelsToObjectReference(obj metav1.Object, contextNamespace string, mapper meta.RESTMapper, groupKey, kindKey, nameKey, side string) (*corev1.ObjectReference, error) {
 	prefix := fmt.Sprintf("object %s", obj.GetName())
 	if obj.GetNamespace() != "" {
 		prefix = fmt.Sprintf("object %s/%s", obj.GetNamespace(), obj.GetName())
@@ -190,36 +208,27 @@ func MachineLifecycleLabelsToObjectReference(obj metav1.Object) (*corev1.ObjectR
 		return nil, fmt.Errorf("%s has no labels", prefix)
 	}
 
-	group := labels[MachineLifecycleGroup]
-	if group == "" {
-		return nil, fmt.Errorf("%s has no group label", prefix)
-	}
-
-	version := labels[MachineLifecycleVersion]
-	if version == "" {
-		return nil, fmt.Errorf("%s has no version label", prefix)
-	}
-
-	kind := labels[MachineLifecycleKind]
+	group, kind, name := labels[groupKey], labels[kindKey], labels[nameKey]
 	if kind == "" {
-		return nil, fmt.Errorf("%s has no kind label", prefix)
+		return nil, fmt.Errorf("%s has no %s kind label", prefix, side)
 	}
-
-	namespace := labels[MachineLifecycleNamespace]
-	if namespace == "" {
-		return nil, fmt.Errorf("%s has no namespace label", prefix)
-	}
-
-	name := labels[MachineLifecycleName]
 	if name == "" {
-		return nil, fmt.Errorf("%s has no name label", prefix)
+		return nil, fmt.Errorf("%s has no %s name label", prefix, side)
 	}
 
-	gvr := schema.GroupVersionKind{Group: group, Version: version, Kind: kind}
+	gvk, scope, err := ResolveKindStorageVersion(mapper, schema.GroupKind{Group: group, Kind: kind})
+	if err != nil {
+		return nil, fmt.Errorf("%s: resolving %s/%s: %w", prefix, group, kind, err)
+	}
+
+	ns := contextNamespace
+	if scope != nil && scope.Name() == meta.RESTScopeNameRoot {
+		ns = ""
+	}
 	return &corev1.ObjectReference{
-		APIVersion: gvr.GroupVersion().String(),
-		Kind:       gvr.Kind,
+		APIVersion: gvk.GroupVersion().String(),
+		Kind:       gvk.Kind,
 		Name:       name,
-		Namespace:  namespace,
+		Namespace:  ns,
 	}, nil
 }

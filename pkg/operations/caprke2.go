@@ -72,7 +72,7 @@ func (a *CAPRKE2Adapter) GetServerURL(secret *corev1.Secret) string {
 		return ""
 	}
 
-	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(secret)
+	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(secret, secret.Namespace, a.clients.RESTMapper)
 	if err != nil {
 		logrus.Errorf("error getting reference for machine lifecycle labels: %v", err)
 		return ""
@@ -110,11 +110,9 @@ func (a *CAPRKE2Adapter) GetSupervisorPort(_ *corev1.Secret) string {
 // CAPRAdapter.WaitForRegister — see pkg/operations/capr.go:122-175. Labels are identical because
 // the system-agent's plan-secret labeling is operation-package-agnostic.
 func (a *CAPRKE2Adapter) WaitForRegister() (bool, error) {
-	labelSelector := fmt.Sprintf("%s=%s,%s=%s,%s=%s,%s=%s,%s=%s",
+	labelSelector := fmt.Sprintf("%s=%s,%s=%s,%s=%s",
 		planv1alpha1.ClusterLifecycleGroup, capiv1beta2.GroupVersion.Group,
-		planv1alpha1.ClusterLifecycleVersion, capiv1beta2.GroupVersion.Version,
-		planv1alpha1.ClusterLifecycleKind, a.cluster.Kind,
-		planv1alpha1.ClusterLifecycleNamespace, a.cluster.Namespace,
+		planv1alpha1.ClusterLifecycleKind, "Cluster",
 		planv1alpha1.ClusterLifecycleName, a.cluster.Name)
 	secretList, err := a.clients.Core.Secret().List(a.cluster.Namespace, metav1.ListOptions{
 		LabelSelector: labelSelector,
@@ -409,7 +407,7 @@ func (a *CAPRKE2Adapter) bootstrapDataDir(secret *corev1.Secret) string {
 	if !planv1alpha1.HasMachineLifecycleLabels(secret) {
 		return ""
 	}
-	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(secret)
+	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(secret, secret.Namespace, a.clients.RESTMapper)
 	if err != nil {
 		logrus.Errorf("[caprke2] error resolving machine lifecycle labels on secret %s/%s: %v", secret.Namespace, secret.Name, err)
 		return ""

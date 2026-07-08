@@ -83,7 +83,7 @@ func (a *CAPRAdapter) GetServerURL(secret *corev1.Secret) string {
 		return ""
 	}
 
-	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(secret)
+	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(secret, secret.Namespace, a.clients.RESTMapper)
 	if err != nil {
 		logrus.Errorf("error getting reference for machine lifecycle labels: %v", err)
 		return ""

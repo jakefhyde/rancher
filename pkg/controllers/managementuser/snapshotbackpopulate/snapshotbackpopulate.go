@@ -66,6 +66,7 @@ type handler struct {
 	clusterRef corev1.ObjectReference
 
 	dynamic                dynamicClient
+	restMapper             meta.RESTMapper
 	etcdSnapshotCache      rkev1controllers.ETCDSnapshotCache
 	etcdSnapshotController rkev1controllers.ETCDSnapshotController
 	beaconCache            plancontrollers.BeaconCache
@@ -82,6 +83,7 @@ func Register(ctx context.Context, userContext *config.UserContext, capiCtx *wra
 	logrus.Debugf("[snapshotbackpopulate] Registering controller for cluster %s", userContext.ClusterName)
 	h := handler{
 		dynamic:                    userContext.Management.Wrangler.Dynamic,
+		restMapper:                 userContext.Management.Wrangler.RESTMapper,
 		etcdSnapshotCache:          userContext.Management.Wrangler.RKE.ETCDSnapshot().Cache(),
 		etcdSnapshotController:     userContext.Management.Wrangler.RKE.ETCDSnapshot(),
 		beaconCache:                userContext.Management.Wrangler.Plan.Beacon().Cache(),
@@ -542,7 +544,15 @@ func (h *handler) machineOwnerReferenceForNode(cluster *unstructured.Unstructure
 	if err != nil {
 		return metav1.OwnerReference{}, err
 	}
-	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(node)
+	// Derive the mgmt-side namespace from the clusterRef. For imported RKE2/K3s the clusterRef
+	// points at a cluster-scoped mgmt v3 Cluster, and its mgmt v3 Node lives in the namespace
+	// named after the cluster. For v2prov the clusterRef is namespace-scoped and the CAPI
+	// Machine lives alongside it. (The CAPI-native branch is handled above and never reaches here.)
+	machineNamespace := h.clusterRef.Namespace
+	if machineNamespace == "" {
+		machineNamespace = h.clusterRef.Name
+	}
+	ref, err := planv1alpha1.MachineLifecycleLabelsToObjectReference(node, machineNamespace, h.restMapper)
 	if err != nil {
 		return metav1.OwnerReference{}, err
 	}
