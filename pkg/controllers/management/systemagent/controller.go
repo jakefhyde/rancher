@@ -76,6 +76,10 @@ func Register(ctx context.Context, w *wrangler.Context, manager *clustermanager.
 	w.Mgmt.Cluster().OnChange(ctx, "imported-system-agent-setup", h.OnChange)
 }
 
+// shouldInstall determines if the system agent should be installed based on the cluster's properties and annotations.
+// v2prov Clusters are handled by the managesystemagent handler, whereas both imported RKE2/K3s and imported CAPRKE2
+// should be handled by this controller. Ideally, all will be unified in the future however this prevents unnecessary
+// regression risks.
 func shouldInstall(cluster *apimgmtv3.Cluster) bool {
 	if cluster == nil {
 		return false
@@ -120,7 +124,6 @@ func (h *handler) OnChange(_ string, cluster *apimgmtv3.Cluster) (*apimgmtv3.Clu
 		return cluster, nil
 	}
 
-	// only applies to imported RKE2/K3s cluster
 	if !shouldInstall(cluster) {
 		return cluster, nil
 	}
@@ -160,7 +163,6 @@ func (h *handler) OnChange(_ string, cluster *apimgmtv3.Cluster) (*apimgmtv3.Clu
 	return h.clusters.Update(cluster)
 }
 
-// todo: add system-agent uninstall plan
 func (h *handler) UninstallSystemAgent(cluster *apimgmtv3.Cluster) (*apimgmtv3.Cluster, error) {
 	beacon, err := h.beaconCache.Get(cluster.Name, cluster.Name)
 	if err != nil && !apierrors.IsNotFound(err) {
