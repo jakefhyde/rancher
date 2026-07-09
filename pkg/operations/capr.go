@@ -61,9 +61,8 @@ func (a *CAPRAdapter) BeaconRef() (string, string) {
 	return a.controlPlane.Namespace, a.controlPlane.Name
 }
 
-func (a *CAPRAdapter) ToS3ArgsEnvAndFiles(secret *corev1.Secret) ([]string, []string, []plan.File) {
-	//TODO implement me
-	panic("implement me")
+func (a *CAPRAdapter) ToS3ArgsEnvAndFiles(_ *corev1.Secret) (args []string, env []string, files []plan.File) {
+	return nil, nil, nil
 }
 
 func (a *CAPRAdapter) LoopbackAddress(_ *corev1.Secret) string {

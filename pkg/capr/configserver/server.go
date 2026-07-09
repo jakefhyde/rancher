@@ -129,7 +129,6 @@ func (r *RKE2ConfigServer) DeferCAPIResources(clients *wrangler.Context) {
 }
 
 func (r *RKE2ConfigServer) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	// todo(jhyde): only CAPI available if not imported
 	if !r.capiAvailable {
 		logrus.Debug("[rke2configserver] CAPI not ready yet")
 		rw.WriteHeader(http.StatusServiceUnavailable)
