@@ -55,6 +55,12 @@ type CAPRAdapter struct {
 	clients      *wrangler.CAPIContext
 }
 
+// BeaconRef returns the CAPI cluster's location — for v2prov/CAPR the RKEControlPlane, provv1
+// Cluster, CAPI Cluster, and beacon all share (controlPlane.Namespace, controlPlane.Name).
+func (a *CAPRAdapter) BeaconRef() (string, string) {
+	return a.controlPlane.Namespace, a.controlPlane.Name
+}
+
 func (a *CAPRAdapter) ToS3ArgsEnvAndFiles(secret *corev1.Secret) ([]string, []string, []plan.File) {
 	//TODO implement me
 	panic("implement me")
@@ -68,6 +74,10 @@ func (a *CAPRAdapter) LoopbackAddress(_ *corev1.Secret) string {
 	}
 
 	return loopbackAddress
+}
+
+func (a *CAPRAdapter) ConfigFile(_ *corev1.Secret) string {
+	return fmt.Sprintf("/etc/rancher/%s/config.yaml", a.RuntimeCommand())
 }
 
 func (a *CAPRAdapter) ConfigDirectory(_ *corev1.Secret) string {

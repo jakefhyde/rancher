@@ -30,6 +30,7 @@ type stubAdapter struct {
 	waitForRegisterOK bool
 }
 
+func (a *stubAdapter) BeaconRef() (string, string)                       { return "test-namespace", "test-cluster" }
 func (a *stubAdapter) WaitForRegister() (bool, error)                    { return a.waitForRegisterOK, nil }
 func (a *stubAdapter) PauseCluster(_ bool) error                         { return nil }
 func (a *stubAdapter) RuntimeCommand() string                            { return a.runtimeCommand }

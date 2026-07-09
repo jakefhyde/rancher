@@ -123,6 +123,18 @@ var (
 // the Adapter interface exposes all methods required for constructing a node plan for the supported types.
 // The adapter currently supports v2prov, CAPR and imported clusters.
 type Adapter interface {
+	// BeaconRef returns the (namespace, name) where the cluster's beacon lives — and,
+	// by convention, where its machine-plan secrets and etcd-snapshot CRs also live. Operation
+	// controllers use this to resolve cluster-scoped state regardless of what ClusterRef the
+	// user (or UI) supplied on the operation:
+	//   - v2prov (CAPR): (controlPlane.Namespace, controlPlane.Name) — the provv1.Cluster's
+	//     namespace (typically fleet-default) alongside the CAPI cluster of the same name.
+	//   - CAPRKE2 (turtles-imported): (cluster.Namespace, cluster.Name) — the CAPI cluster's
+	//     own namespace.
+	//   - Imported RKE2/K3s: (cluster.Name, cluster.Name) — the mgmt v3 Cluster is
+	//     cluster-scoped, so its name doubles as the namespace convention.
+	BeaconRef() (namespace, name string)
+
 	// WaitForRegister waits for all machine-plan secrets to be created, ensuring the system-agent has checked in for
 	// all expected nodes.
 	WaitForRegister() (bool, error)
@@ -143,6 +155,8 @@ type Adapter interface {
 	// ProvisioningDataDirectory returns the path to the data directory used for operations.
 	// Scripts created for commands are typically stored here.
 	ProvisioningDataDirectory(secret *corev1.Secret) string
+	
+	ConfigFile(secret *corev1.Secret) string
 
 	ConfigDirectory(secret *corev1.Secret) string
 

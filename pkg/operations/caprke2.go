@@ -40,6 +40,13 @@ type CAPRKE2Adapter struct {
 	clients      *wrangler.CAPIContext
 }
 
+// BeaconRef returns the CAPI cluster's (namespace, name). Turtles-imported CAPRKE2 clusters
+// keep every piece of cluster-scoped state — beacon, machine-plan secrets, etcd-snapshot CRs —
+// in the CAPI cluster's namespace, not the mgmt-shell namespace.
+func (a *CAPRKE2Adapter) BeaconRef() (string, string) {
+	return a.cluster.Namespace, a.cluster.Name
+}
+
 // ToS3ArgsEnvAndFiles returns the S3 args/env/files that should be appended to an etcd-snapshot
 // save operation for this cluster. CAPRKE2 does not yet model S3 snapshot configuration on the
 // RKE2ControlPlane in a form that the operations controllers consume, so this is a no-op for now
@@ -56,7 +63,12 @@ func (a *CAPRKE2Adapter) LoopbackAddress(_ *corev1.Secret) string {
 	return "127.0.0.1"
 }
 
-// ConfigDirectory returns the runtime config drop-in directory on the host. RKE2 only.
+// ConfigFile returns the runtime config file on the host.
+func (a *CAPRKE2Adapter) ConfigFile(_ *corev1.Secret) string {
+	return "/etc/rancher/rke2/config.yaml"
+}
+
+// ConfigDirectory returns the runtime config drop-in directory on the host.
 func (a *CAPRKE2Adapter) ConfigDirectory(_ *corev1.Secret) string {
 	return "/etc/rancher/rke2/config.yaml.d"
 }

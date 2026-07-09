@@ -78,6 +78,8 @@ const (
 	// WaitingForEncryptionKeyRotationReason surfaces when the rotate-keys plan has been applied
 	// but the runtime secrets-encrypt status has not yet confirmed reencrypt_finished.
 	WaitingForEncryptionKeyRotationReason = "WaitingForEncryptionKeyRotation"
+
+	PreflightCheckFailedReason = "PreflightCheckFailed"
 )
 
 func WaitingForDelegateMessage(beacon *planv1alpha1.Beacon) string {

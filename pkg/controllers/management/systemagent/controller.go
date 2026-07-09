@@ -48,6 +48,29 @@ const (
 	SystemAgentUpgraderClusterRoleBindingName = "system-agent-upgrader"
 )
 
+// Enabled checks if version management is enabled for a given cluster
+func OperationsEnabledForCluster(cluster *apimgmtv3.Cluster) bool {
+	if cluster == nil {
+		return false
+	}
+
+	value := ""
+	if cluster.Annotations != nil {
+		value = cluster.Annotations[Day2OpsEnabledAnnotation]
+	}
+
+	switch value {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "system-default":
+		fallthrough
+	default:
+		return settings.ImportedClusterDay2OpsEnabledDefault.Get() == "true"
+	}
+}
+
 var (
 	// installCounter keeps track of the number of clusters for which the handler is concurrently installing or upgrading
 	// the resources needed for upgrading system-agent.
@@ -78,7 +101,7 @@ func Register(ctx context.Context, w *wrangler.Context, manager *clustermanager.
 
 // shouldInstall determines if the system agent should be installed based on the cluster's properties and annotations.
 // v2prov Clusters are handled by the managesystemagent handler, whereas both imported RKE2/K3s and imported CAPRKE2
-// should be handled by this controller. Ideally, all will be unified in the future however this prevents unnecessary
+// should be handled by this controller. Ideally, all will be unified in the future, however, this prevents unnecessary
 // regression risks.
 func shouldInstall(cluster *apimgmtv3.Cluster) bool {
 	if cluster == nil {
@@ -129,24 +152,9 @@ func (h *handler) OnChange(_ string, cluster *apimgmtv3.Cluster) (*apimgmtv3.Clu
 	}
 
 	if features.ImportedDay2Ops.Enabled() {
-		if cluster.Annotations == nil || cluster.Annotations[Day2OpsEnabledAnnotation] == "" {
-			// if default is enable, set annotation
-			if settings.ImportedClusterDay2OpsEnabledDefault.Get() == "true" {
-				cluster := cluster.DeepCopy()
-				if cluster.Annotations == nil {
-					cluster.Annotations = map[string]string{}
-				}
-				cluster.Annotations[Day2OpsEnabledAnnotation] = "true"
-				logrus.Infof("[importedsystemagent] cluster %s: setting %s to true", cluster.Name, Day2OpsEnabledAnnotation)
-				return h.clusters.Update(cluster)
-			}
-		} else if cluster.Annotations[Day2OpsEnabledAnnotation] != "true" {
-			// otherwise if annotation set to false, uninstall
-			return h.UninstallSystemAgent(cluster)
-
+		if OperationsEnabledForCluster(cluster) {
+			return h.InstallSystemAgent(cluster)
 		}
-		// otherwise if annotation set to true, install
-		return h.InstallSystemAgent(cluster)
 	}
 
 	cluster, err := h.UninstallSystemAgent(cluster)

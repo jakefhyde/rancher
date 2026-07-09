@@ -15,7 +15,7 @@ import (
 	operationcontrollers "github.com/rancher/rancher/pkg/generated/controllers/operation.cattle.io/v1alpha1"
 	rkecontrollers "github.com/rancher/rancher/pkg/generated/controllers/rke.cattle.io/v1"
 	ops "github.com/rancher/rancher/pkg/operations"
-	planapi "github.com/rancher/rancher/pkg/plan"
+	plan "github.com/rancher/rancher/pkg/plan"
 	planv1alpha1 "github.com/rancher/rancher/pkg/plan/api/plan.cattle.io/v1alpha1"
 	plancontrollers "github.com/rancher/rancher/pkg/plan/generated/controllers/plan.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/wrangler"
@@ -24,7 +24,6 @@ import (
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -38,6 +37,10 @@ const ControllerOwnerKey = "etcd-snapshot-restore"
 // label constants. The shutdown / restore / pod-cleanup / restart / node-cleanup / final-restart
 // sequence is unique to restore — there is no analogue on save / encryption-key-rotation.
 const (
+	// PreflightStepHookLabelPrefix gates the Preflight step, before the controller performs
+	// the necessary preflight checks to determine whether or not the operation can proceed.
+	PreflightStepHookLabelPrefix = "preflight.step.hook.operation.cattle.io/"
+
 	// ShutdownStepHookLabelPrefix gates the Shutdown step, before the controller assigns the
 	// killall + tombstone-touch + tls/cred-directory cleanup plan to every non-Windows secret.
 	ShutdownStepHookLabelPrefix = "shutdown.step.hook.operation.cattle.io/"
@@ -158,7 +161,7 @@ type handler struct {
 	secrets     corecontrollers.SecretClient
 	secretCache corecontrollers.SecretCache
 
-	store *planapi.Store
+	store *plan.Store
 
 	dynamic *dynamic.Controller
 
@@ -174,7 +177,7 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext) {
 		secrets:              clients.Core.Secret(),
 		secretCache:          clients.Core.Secret().Cache(),
 		dynamic:              clients.Dynamic,
-		store:                planapi.NewStore(clients.Core.Secret()),
+		store:                plan.NewStore(clients.Core.Secret()),
 		clients:              clients,
 	}
 
@@ -255,27 +258,22 @@ func (h *handler) onChange(op *opv1alpha1.ETCDSnapshotRestore, status opv1alpha1
 
 	ustr := unstructured.Unstructured{Object: ustrMap}
 
-	namespace := op.Spec.ClusterRef.Namespace
-	if namespace == "" {
-		mapping, err := h.clients.RESTMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-		if err != nil {
-			return status, err
-		}
-		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-			namespace = op.Namespace
-		} else {
-			namespace = op.Spec.ClusterRef.Name
-		}
+	a, err := ops.NewAdapter(h.clients, &ustr)
+	if err != nil {
+		return status, err
 	}
 
-	beacon, err := h.beacons.Get(namespace, ustr.GetName(), metav1.GetOptions{})
+	// Resolve the beacon (and every other cluster-scoped artifact — plan secrets, snapshot CRs)
+	// via the adapter, not the op.Spec.ClusterRef. When the UI creates ops against the mgmt v3
+	// Cluster, ClusterRef points there but the real state lives in the underlying provisioner's
+	// namespace (fleet-default for v2prov, CAPI ns for CAPRKE2). BeaconRef() gives the correct
+	// (namespace, name) for each adapter type.
+	namespace, beaconName := a.BeaconRef()
+
+	beacon, err := h.beacons.Get(namespace, beaconName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) && status.Phase == opv1alpha1.OperationPhasePending {
-		key := fmt.Sprintf("apiVersion=%s, kind=%s", ustr.GetAPIVersion(), ustr.GetKind())
-		if ustr.GetNamespace() != "" {
-			key += fmt.Sprintf(", namespace=%s", ustr.GetNamespace())
-		}
-		key += fmt.Sprintf(", name=%s", ustr.GetName())
-		logrus.Warnf("[etcdsnapshotrestore]: %s/%s failed to find beacon for %s", op.Namespace, op.Name, key)
+		logrus.Warnf("[etcdsnapshotrestore]: %s/%s failed to find beacon %s/%s (clusterRef apiVersion=%s kind=%s name=%s)",
+			op.Namespace, op.Name, namespace, beaconName, ustr.GetAPIVersion(), ustr.GetKind(), ustr.GetName())
 
 		opv1alpha1.PendingCondition.True(&status)
 		opv1alpha1.PendingCondition.Reason(&status, opv1alpha1.WaitingForBeaconReason)
@@ -283,11 +281,6 @@ func (h *handler) onChange(op *opv1alpha1.ETCDSnapshotRestore, status opv1alpha1
 
 		return status, nil
 	} else if err != nil {
-		return status, err
-	}
-
-	a, err := ops.NewAdapter(h.clients, &ustr)
-	if err != nil {
 		return status, err
 	}
 
@@ -359,11 +352,11 @@ func (h *handler) lifecycleHookDelegate(s *scope, prefix string) (string, string
 func (h *handler) delegate(s *scope, name, delegate string) error {
 	logrus.Tracef("[etcdsnapshotrestore] %s/%s: delegating ownership of beacon to %s on behalf of %s", s.op.Namespace, s.op.Name, delegate, name)
 
-	if planapi.IsInDelegateChain(s.beacon, delegate) {
+	if plan.IsInDelegateChain(s.beacon, delegate) {
 		return nil
 	}
 
-	beacon, err := planapi.PushDelegate(s.beacon, delegate, h.beacons)
+	beacon, err := plan.PushDelegate(s.beacon, delegate, h.beacons)
 	if err != nil {
 		return err
 	}
@@ -414,7 +407,7 @@ func nonWindowsSecret(secret *corev1.Secret) bool {
 }
 
 func (h *handler) handlePending(s *scope, status opv1alpha1.ETCDSnapshotRestoreStatus) (opv1alpha1.ETCDSnapshotRestoreStatus, error) {
-	beacon, err := planapi.AcquireBeacon(s.beacon, h.beacons, ControllerOwnerKey)
+	beacon, err := plan.AcquireBeacon(s.beacon, h.beacons, ControllerOwnerKey)
 	if err != nil {
 		return status, err
 	}
@@ -453,7 +446,7 @@ func (h *handler) handlePending(s *scope, status opv1alpha1.ETCDSnapshotRestoreS
 	logrus.Infof("[etcdsnapshotrestore] %s/%s: transitioning to shutdown", s.op.Namespace, s.op.Name)
 
 	status.SetPhase(opv1alpha1.OperationPhaseInProgress)
-	status.SetStep(opv1alpha1.ETCDSnapshotRestoreStepShutdown)
+	status.SetStep(opv1alpha1.ETCDSnapshotRestoreStepPreflight)
 
 	opv1alpha1.InProgressCondition.True(&status)
 	opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.InProgressReason)
@@ -461,7 +454,7 @@ func (h *handler) handlePending(s *scope, status opv1alpha1.ETCDSnapshotRestoreS
 }
 
 func (h *handler) handleInProgress(s *scope, status opv1alpha1.ETCDSnapshotRestoreStatus) (opv1alpha1.ETCDSnapshotRestoreStatus, error) {
-	if !planapi.IsOwningBeaconHolder(s.beacon, ControllerOwnerKey) {
+	if !plan.IsOwningBeaconHolder(s.beacon, ControllerOwnerKey) {
 		status.SetPhase(opv1alpha1.OperationPhaseFailed)
 
 		opv1alpha1.FailedCondition.True(&status)
@@ -472,7 +465,7 @@ func (h *handler) handleInProgress(s *scope, status opv1alpha1.ETCDSnapshotResto
 	}
 
 	var err error
-	s.beacon, err = planapi.ToggleBeacon(s.beacon, true, h.beacons)
+	s.beacon, err = plan.ToggleBeacon(s.beacon, true, h.beacons)
 	if err != nil {
 		return status, err
 	}
@@ -491,6 +484,8 @@ func (h *handler) handleInProgress(s *scope, status opv1alpha1.ETCDSnapshotResto
 	}
 
 	switch s.op.Status.Step {
+	case opv1alpha1.ETCDSnapshotRestoreStepPreflight:
+		return h.reconcilePreflight(s, status)
 	case opv1alpha1.ETCDSnapshotRestoreStepShutdown:
 		return h.reconcileShutdown(s, status)
 	case opv1alpha1.ETCDSnapshotRestoreStepRestore:
@@ -509,8 +504,9 @@ func (h *handler) handleInProgress(s *scope, status opv1alpha1.ETCDSnapshotResto
 
 	opv1alpha1.FailedCondition.True(&status)
 	opv1alpha1.FailedCondition.Reason(&status, opv1alpha1.UnknownStepReason)
-	opv1alpha1.FailedCondition.Message(&status, fmt.Sprintf("current step [\"%s\"] is unknown, expected one of: [\"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\"]",
+	opv1alpha1.FailedCondition.Message(&status, fmt.Sprintf("current step [\"%s\"] is unknown, expected one of: [\"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\", \"%s\"]",
 		status.Step,
+		opv1alpha1.ETCDSnapshotRestoreStepPreflight,
 		opv1alpha1.ETCDSnapshotRestoreStepShutdown,
 		opv1alpha1.ETCDSnapshotRestoreStepRestore,
 		opv1alpha1.ETCDSnapshotRestoreStepPostRestorePodCleanup,
@@ -518,6 +514,104 @@ func (h *handler) handleInProgress(s *scope, status opv1alpha1.ETCDSnapshotResto
 		opv1alpha1.ETCDSnapshotRestoreStepPostRestoreNodeCleanup,
 		opv1alpha1.ETCDSnapshotRestoreStepRestartCluster))
 
+	return status, nil
+}
+
+func (h *handler) reconcilePreflight(s *scope, status opv1alpha1.ETCDSnapshotRestoreStatus) (opv1alpha1.ETCDSnapshotRestoreStatus, error) {
+	logrus.Debugf("[etcdsnapshotrestore] %s/%s: handling shutdown", s.op.Namespace, s.op.Name)
+
+	delegated, err := h.handleHook(s, PreflightStepHookLabelPrefix)
+	if err != nil {
+		return status, err
+	} else if delegated {
+		opv1alpha1.InProgressCondition.True(&status)
+		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForDelegateReason)
+		opv1alpha1.InProgressCondition.Message(&status, fmt.Sprintf("Waiting for delegates to finish: %v", opv1alpha1.WaitingForDelegateMessage(s.beacon)))
+		return status, nil
+	}
+
+	secrets, err := plan.NewCollector(h.secrets, s.clusterObj, s.namespace).
+		WithSorter(plan.DefaultSorter()).
+		WithFilter(ops.IsEtcd).
+		WithValidator(plan.AtLeast(1, "")).
+		Collect()
+	if plan.IsTransient(err) {
+		return status, err
+	} else if err != nil {
+		logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as canceled: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
+
+		status.SetPhase(opv1alpha1.OperationPhaseCanceled)
+
+		opv1alpha1.CanceledCondition.True(&status)
+		opv1alpha1.CanceledCondition.Reason(&status, opv1alpha1.PreflightCheckFailedReason)
+		opv1alpha1.CanceledCondition.Message(&status, fmt.Sprintf("encountered terminal error collecting machine-plan secrets: %v", err))
+		return status, nil
+	}
+
+	concurrency := len(secrets)
+	results := make([]plan.PlanStatus, 0, concurrency)
+
+	for _, secret := range secrets {
+		nodePlan := &plan.Plan{
+			OneTimeInstructions: []plan.OneTimeInstruction{
+				{
+					CommonInstruction: plan.CommonInstruction{
+						Name:    "preflight",
+						Command: "/bin/sh",
+						Args: []string{
+							"-c",
+							fmt.Sprintf("grep -rE -q \"^[[:space:]]*['\\\" ]?token['\\\" ]?[[:space:]]*:[[:space:]]*['\\\" ]*[^[:space:]'\\\"]+\" %s %s/ 2>/dev/null || exit 1)",
+								s.adapter.ConfigFile(secret),
+								s.adapter.ConfigDirectory(secret),
+							),
+						},
+					},
+				},
+			},
+		}
+
+		planStatus, err := h.store.AssignPlan(secret, nodePlan, 1, -1)
+		if err != nil {
+			return status, err
+		}
+
+		results = append(results, *planStatus)
+
+		if planStatus.Failure() {
+			logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: preflight check failed for %s/%s",
+				s.op.Namespace, s.op.Name, secret.Namespace, secret.Name)
+
+			status.SetPhase(opv1alpha1.OperationPhaseCanceled)
+
+			opv1alpha1.FailedCondition.True(&status)
+			opv1alpha1.FailedCondition.Reason(&status, opv1alpha1.PreflightCheckFailedReason)
+			opv1alpha1.FailedCondition.Message(&status, fmt.Sprintf("could not find server token for %s/%s", secret.Namespace, secret.Name))
+
+			return status, nil
+		}
+
+		if planStatus.Waiting() {
+			logrus.Debugf("[etcdsnapshotrestore] %s/%s: waiting for preflight check for %s/%s", s.op.Namespace, s.op.Name, secret.Namespace, secret.Name)
+
+			concurrency--
+			if concurrency <= 0 {
+				break
+			}
+		}
+	}
+
+	if concurrency < len(secrets) {
+		msg := plan.Message(results)
+		opv1alpha1.InProgressCondition.True(&status)
+		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
+		opv1alpha1.InProgressCondition.Message(&status, fmt.Sprintf("Waiting in step %s: %s", status.Step, msg))
+
+		return status, nil
+	}
+
+	logrus.Infof("[etcdsnapshotrestore] %s/%s: transitioning to shutdown", s.op.Namespace, s.op.Name)
+
+	status.SetStep(opv1alpha1.ETCDSnapshotRestoreStepShutdown)
 	return status, nil
 }
 
@@ -534,12 +628,12 @@ func (h *handler) reconcileShutdown(s *scope, status opv1alpha1.ETCDSnapshotRest
 		return status, nil
 	}
 
-	secrets, err := planapi.NewCollector(h.secrets, s.clusterObj, s.namespace).
-		WithSorter(planapi.DefaultSorter()).
+	secrets, err := plan.NewCollector(h.secrets, s.clusterObj, s.namespace).
+		WithSorter(plan.DefaultSorter()).
 		WithFilter(nonWindowsSecret).
-		WithValidator(planapi.AtLeast(1, "")).
+		WithValidator(plan.AtLeast(1, "")).
 		Collect()
-	if planapi.IsTransient(err) {
+	if plan.IsTransient(err) {
 		return status, err
 	} else if err != nil {
 		logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
@@ -552,14 +646,17 @@ func (h *handler) reconcileShutdown(s *scope, status opv1alpha1.ETCDSnapshotRest
 		return status, nil
 	}
 
+	concurrency := len(secrets)
+	results := make([]plan.PlanStatus, 0, concurrency)
+
 	for _, secret := range secrets {
 		provisioningDir := s.adapter.ProvisioningDataDirectory(secret)
 		// Clear any prior idempotency tracking under the restore key before starting; subsequent
 		// reconciles see the cleanup already applied and skip it.
-		instructions := []planapi.OneTimeInstruction{
+		instructions := []plan.OneTimeInstruction{
 			ops.GenerateIdempotencyCleanupInstruction(provisioningDir, idempotencyKey),
 			{
-				CommonInstruction: planapi.CommonInstruction{
+				CommonInstruction: plan.CommonInstruction{
 					Name:    "shutdown",
 					Command: "/bin/sh",
 					Env: []string{
@@ -576,8 +673,8 @@ func (h *handler) reconcileShutdown(s *scope, status opv1alpha1.ETCDSnapshotRest
 		}
 
 		if secret.Labels[capr.EtcdRoleLabel] == "true" {
-			instructions = append(instructions, planapi.OneTimeInstruction{
-				CommonInstruction: planapi.CommonInstruction{
+			instructions = append(instructions, plan.OneTimeInstruction{
+				CommonInstruction: plan.CommonInstruction{
 					Name:    "create-etcd-tombstone",
 					Command: "touch",
 					Args:    []string{path.Join(s.adapter.DistroDataDirectory(secret), "server/db/etcd/tombstone")},
@@ -587,15 +684,15 @@ func (h *handler) reconcileShutdown(s *scope, status opv1alpha1.ETCDSnapshotRest
 
 		if secret.Labels[capr.EtcdRoleLabel] == "true" || secret.Labels[capr.ControlPlaneRoleLabel] == "true" {
 			instructions = append(instructions,
-				planapi.OneTimeInstruction{
-					CommonInstruction: planapi.CommonInstruction{
+				plan.OneTimeInstruction{
+					CommonInstruction: plan.CommonInstruction{
 						Name:    "remove-tls-directory",
 						Command: "rm",
 						Args:    []string{"-rf", path.Join(s.adapter.DistroDataDirectory(secret), "server/tls")},
 					},
 				},
-				planapi.OneTimeInstruction{
-					CommonInstruction: planapi.CommonInstruction{
+				plan.OneTimeInstruction{
+					CommonInstruction: plan.CommonInstruction{
 						Name:    "remove-cred-directory",
 						Command: "rm",
 						Args:    []string{"-rf", path.Join(s.adapter.DistroDataDirectory(secret), "server/cred")},
@@ -604,8 +701,8 @@ func (h *handler) reconcileShutdown(s *scope, status opv1alpha1.ETCDSnapshotRest
 			)
 		}
 
-		nodePlan := &planapi.Plan{
-			Files:               []planapi.File{ops.IdempotentScriptFile(provisioningDir)},
+		nodePlan := &plan.Plan{
+			Files:               []plan.File{ops.IdempotentScriptFile(provisioningDir)},
 			OneTimeInstructions: instructions,
 		}
 
@@ -613,6 +710,8 @@ func (h *handler) reconcileShutdown(s *scope, status opv1alpha1.ETCDSnapshotRest
 		if err != nil {
 			return status, err
 		}
+
+		results = append(results, *planStatus)
 
 		if planStatus.Failure() {
 			logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: shutdown failed for %s/%s",
@@ -627,15 +726,23 @@ func (h *handler) reconcileShutdown(s *scope, status opv1alpha1.ETCDSnapshotRest
 			return status, nil
 		}
 
-		if wait, msg := planStatus.Wait(); wait {
-			logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for shutdown: %s", s.op.Namespace, s.op.Name, msg)
+		if planStatus.Waiting() {
+			logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for shutdown for %s/%s", s.op.Namespace, s.op.Name, secret.Namespace, secret.Name)
 
-			opv1alpha1.InProgressCondition.True(&status)
-			opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-			opv1alpha1.InProgressCondition.Message(&status, msg)
-
-			return status, nil
+			concurrency--
+			if concurrency <= 0 {
+				break
+			}
 		}
+	}
+
+	if concurrency < len(secrets) {
+		msg := plan.Message(results)
+		opv1alpha1.InProgressCondition.True(&status)
+		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
+		opv1alpha1.InProgressCondition.Message(&status, fmt.Sprintf("Waiting in step %s: %s", status.Step, msg))
+
+		return status, nil
 	}
 
 	logrus.Infof("[etcdsnapshotrestore] %s/%s: transitioning to restore", s.op.Namespace, s.op.Name)
@@ -705,7 +812,6 @@ func (h *handler) reconcileRestore(s *scope, status opv1alpha1.ETCDSnapshotResto
 		}
 	}
 
-	// todo: elect leader based on snapshot
 	secret, err := s.adapter.FindOrElectLeader(ControllerOwnerKey, filter)
 	if err != nil {
 		logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
@@ -740,7 +846,7 @@ func (h *handler) reconcileRestore(s *scope, status opv1alpha1.ETCDSnapshotResto
 
 	var env []string
 
-	files := []planapi.File{
+	files := []plan.File{
 		{
 			Content: base64.StdEncoding.EncodeToString([]byte("server: \"\"\n")),
 			Path:    path.Join(s.adapter.ConfigDirectory(secret), "zz_etcd-snapshot-restore.yaml"),
@@ -760,11 +866,11 @@ func (h *handler) reconcileRestore(s *scope, status opv1alpha1.ETCDSnapshotResto
 		files = append(files, s3Files...)
 	}
 
-	nodePlan := &planapi.Plan{
+	nodePlan := &plan.Plan{
 		Files: files,
-		OneTimeInstructions: []planapi.OneTimeInstruction{
-			ops.ConvertToIdempotentInstruction(provisioningDir, idempotencyKey+"/clean-etcd-dir", value, planapi.OneTimeInstruction{
-				CommonInstruction: planapi.CommonInstruction{
+		OneTimeInstructions: []plan.OneTimeInstruction{
+			ops.ConvertToIdempotentInstruction(provisioningDir, idempotencyKey+"/clean-etcd-dir", value, plan.OneTimeInstruction{
+				CommonInstruction: plan.CommonInstruction{
 					Name:    "remove-etcd-db-dir",
 					Command: "rm",
 					Args:    []string{"-rf", path.Join(s.adapter.DistroDataDirectory(secret), "server/db/etcd")},
@@ -792,12 +898,12 @@ func (h *handler) reconcileRestore(s *scope, status opv1alpha1.ETCDSnapshotResto
 		return status, nil
 	}
 
-	if wait, msg := planStatus.Wait(); wait {
-		logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for etcd restore: %s", s.op.Namespace, s.op.Name, msg)
+	if planStatus.Waiting() {
+		logrus.Debugf("[etcdsnapshotrestore] %s/%s: waiting for etcd restore for %s/%s", s.op.Namespace, s.op.Name, secret.Namespace, secret.Name)
 
 		opv1alpha1.InProgressCondition.True(&status)
 		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-		opv1alpha1.InProgressCondition.Message(&status, msg)
+		opv1alpha1.InProgressCondition.Message(&status, plan.Message([]plan.PlanStatus{*planStatus}))
 
 		return status, nil
 	}
@@ -848,11 +954,11 @@ func (h *handler) reconcilePostRestorePodCleanup(s *scope, status opv1alpha1.ETC
 	if ops.IsControlPlane(etcdSecret) {
 		controlPlaneSecret = etcdSecret
 	} else {
-		secrets, err := planapi.NewCollector(h.secrets, s.clusterObj, s.namespace).
-			WithLabels(planapi.Label(capr.ControlPlaneRoleLabel, "true")).
-			WithSorter(planapi.DefaultSorter()).
+		secrets, err := plan.NewCollector(h.secrets, s.clusterObj, s.namespace).
+			WithLabels(plan.Label(capr.ControlPlaneRoleLabel, "true")).
+			WithSorter(plan.DefaultSorter()).
 			Collect()
-		if planapi.IsTransient(err) {
+		if plan.IsTransient(err) {
 			return status, err
 		} else if err != nil {
 			logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
@@ -902,7 +1008,7 @@ func (h *handler) reconcilePostRestorePodCleanup(s *scope, status opv1alpha1.ETC
 	value := s.idempotencyValue()
 	waitScriptPath := etcdRestoreScriptPath(s, etcdSecret, waitForPodListScriptName)
 
-	instructions := []planapi.OneTimeInstruction{
+	instructions := []plan.OneTimeInstruction{
 		ops.IdempotentInstruction(
 			provisioningDir,
 			idempotencyKey+"/post-restore-start-service",
@@ -944,8 +1050,8 @@ func (h *handler) reconcilePostRestorePodCleanup(s *scope, status opv1alpha1.ETC
 		}
 	}
 
-	nodePlan := &planapi.Plan{
-		Files: []planapi.File{
+	nodePlan := &plan.Plan{
+		Files: []plan.File{
 			ops.IdempotentScriptFile(provisioningDir),
 			{
 				Content: base64.StdEncoding.EncodeToString([]byte(waitForPodListScript)),
@@ -957,8 +1063,8 @@ func (h *handler) reconcilePostRestorePodCleanup(s *scope, status opv1alpha1.ETC
 	}
 
 	if etcdSecret.Name != controlPlaneSecret.Name {
-		etcdNodePlan := &planapi.Plan{
-			OneTimeInstructions: []planapi.OneTimeInstruction{
+		etcdNodePlan := &plan.Plan{
+			OneTimeInstructions: []plan.OneTimeInstruction{
 				ops.IdempotentInstruction(
 					provisioningDir,
 					idempotencyKey+"/post-restore-start-service",
@@ -987,17 +1093,17 @@ func (h *handler) reconcilePostRestorePodCleanup(s *scope, status opv1alpha1.ETC
 			return status, nil
 		}
 
-		if wait, msg := planStatus.Wait(); wait {
-			logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for pod cleanup: %s", s.op.Namespace, s.op.Name, msg)
+		if planStatus.Waiting() {
+			logrus.Debugf("[etcdsnapshotrestore] %s/%s: waiting for pod cleanup for %s/%s", s.op.Namespace, s.op.Name, etcdSecret.Namespace, etcdSecret.Name)
 
 			opv1alpha1.InProgressCondition.True(&status)
 			opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-			opv1alpha1.InProgressCondition.Message(&status, msg)
+			opv1alpha1.InProgressCondition.Message(&status, plan.Message([]plan.PlanStatus{*planStatus}))
 
 			return status, nil
 		}
 
-		nodePlan.Files = append(nodePlan.Files, planapi.File{
+		nodePlan.Files = append(nodePlan.Files, plan.File{
 			Content: base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("server: \"https://%s:%s\"\n", s.adapter.GetServerURL(etcdSecret), s.adapter.GetSupervisorPort(etcdSecret)))),
 			Path:    path.Join(s.adapter.ConfigDirectory(controlPlaneSecret), "zz_etcd-snapshot-restore.yaml"),
 		})
@@ -1021,12 +1127,12 @@ func (h *handler) reconcilePostRestorePodCleanup(s *scope, status opv1alpha1.ETC
 		return status, nil
 	}
 
-	if wait, msg := planStatus.Wait(); wait {
-		logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for pod cleanup: %s", s.op.Namespace, s.op.Name, msg)
+	if planStatus.Waiting() {
+		logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for pod cleanup for %s/%s", s.op.Namespace, s.op.Name, controlPlaneSecret.Namespace, controlPlaneSecret.Name)
 
 		opv1alpha1.InProgressCondition.True(&status)
 		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-		opv1alpha1.InProgressCondition.Message(&status, msg)
+		opv1alpha1.InProgressCondition.Message(&status, plan.Message([]plan.PlanStatus{*planStatus}))
 
 		return status, nil
 	}
@@ -1053,11 +1159,11 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 		return status, nil
 	}
 
-	secrets, err := planapi.NewCollector(h.secrets, s.clusterObj, s.namespace).
+	secrets, err := plan.NewCollector(h.secrets, s.clusterObj, s.namespace).
 		WithFilter(nonWindowsSecret).
-		WithSorter(planapi.DefaultSorter()).
+		WithSorter(plan.DefaultSorter()).
 		Collect()
-	if planapi.IsTransient(err) {
+	if plan.IsTransient(err) {
 		return status, err
 	} else if err != nil {
 		logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
@@ -1093,6 +1199,9 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 
 	serverURL := s.adapter.GetServerURL(initSecret)
 
+	concurrency := 1
+	results := make([]plan.PlanStatus, 0, concurrency)
+
 	for _, secret := range secrets {
 		provisioningDir := s.adapter.ProvisioningDataDirectory(secret)
 
@@ -1106,9 +1215,9 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 			unit = s.adapter.RuntimeCommand() + "-agent"
 		}
 
-		nodePlan := &planapi.Plan{
-			Files: []planapi.File{ops.IdempotentScriptFile(provisioningDir)},
-			OneTimeInstructions: []planapi.OneTimeInstruction{
+		nodePlan := &plan.Plan{
+			Files: []plan.File{ops.IdempotentScriptFile(provisioningDir)},
+			OneTimeInstructions: []plan.OneTimeInstruction{
 				ops.IdempotentInstruction(provisioningDir, idempotencyKey+"/restart", value, "systemctl",
 					[]string{"restart", unit}, nil),
 			},
@@ -1117,13 +1226,13 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 
 		if secret.UID != initSecret.UID {
 			if nextStep != "" {
-				nodePlan.Files = append(nodePlan.Files, planapi.File{
+				nodePlan.Files = append(nodePlan.Files, plan.File{
 					Content: base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("server: \"https://%s:%s\"\n", serverURL, s.adapter.GetSupervisorPort(secret)))),
 					Path:    path.Join(s.adapter.ConfigDirectory(secret), "zz_etcd-snapshot-restore.yaml"),
 				})
 			} else {
-				nodePlan.OneTimeInstructions = append(nodePlan.OneTimeInstructions, planapi.OneTimeInstruction{
-					CommonInstruction: planapi.CommonInstruction{
+				nodePlan.OneTimeInstructions = append(nodePlan.OneTimeInstructions, plan.OneTimeInstruction{
+					CommonInstruction: plan.CommonInstruction{
 						Name:    "remove-server-arg",
 						Command: "rm",
 						Args: []string{
@@ -1134,8 +1243,8 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 			}
 		} else {
 			if nextStep == "" {
-				nodePlan.OneTimeInstructions = append(nodePlan.OneTimeInstructions, planapi.OneTimeInstruction{
-					CommonInstruction: planapi.CommonInstruction{
+				nodePlan.OneTimeInstructions = append(nodePlan.OneTimeInstructions, plan.OneTimeInstruction{
+					CommonInstruction: plan.CommonInstruction{
 						Name:    "remove-server-arg",
 						Command: "rm",
 						Args: []string{
@@ -1151,6 +1260,8 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 			return status, err
 		}
 
+		results = append(results, *planStatus)
+
 		if planStatus.Failure() {
 			logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: restart failed for %s/%s",
 				s.op.Namespace, s.op.Name, secret.Namespace, secret.Name)
@@ -1164,15 +1275,23 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 			return status, nil
 		}
 
-		if wait, msg := planStatus.Wait(); wait {
-			logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for restart: %s", s.op.Namespace, s.op.Name, msg)
+		if planStatus.Waiting() {
+			logrus.Debugf("[etcdsnapshotrestore] %s/%s: waiting for restart for %s/%s", s.op.Namespace, s.op.Name, secret.Namespace, secret.Name)
 
-			opv1alpha1.InProgressCondition.True(&status)
-			opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-			opv1alpha1.InProgressCondition.Message(&status, msg)
-
-			return status, nil
+			concurrency--
+			if concurrency <= 0 {
+				break
+			}
 		}
+	}
+
+	if concurrency < 1 {
+		msg := plan.Message(results)
+		opv1alpha1.InProgressCondition.True(&status)
+		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
+		opv1alpha1.InProgressCondition.Message(&status, fmt.Sprintf("Waiting in step %s: %s", status.Step, msg))
+
+		return status, nil
 	}
 
 	if nextStep != "" {
@@ -1195,7 +1314,7 @@ func (h *handler) reconcileRestartCluster(s *scope, status opv1alpha1.ETCDSnapsh
 // buildPostRestoreNodeCleanupPlan assembles the plan that runs the node-cleanup script on the init
 // node. A non-empty skipReason signals that the caller should skip the cleanup phase entirely (the
 // returned plan is nil in that case).
-func buildPostRestoreNodeCleanupPlan(s *scope, initSecret *corev1.Secret, allSecrets []*corev1.Secret) (plan *planapi.Plan, skipReason string) {
+func buildPostRestoreNodeCleanupPlan(s *scope, initSecret *corev1.Secret, allSecrets []*corev1.Secret) (*plan.Plan, string) {
 	kubectl := s.adapter.KubectlPath(initSecret)
 	kubeconfig := s.adapter.KubeconfigPath(initSecret)
 	if kubectl == "" || kubeconfig == "" {
@@ -1221,8 +1340,8 @@ func buildPostRestoreNodeCleanupPlan(s *scope, initSecret *corev1.Secret, allSec
 	cleanupScriptPath := etcdRestoreScriptPath(s, initSecret, nodeCleanupScriptName)
 	nodeNamesPath := etcdRestoreScriptPath(s, initSecret, fmt.Sprintf("node-names-%s", string(s.op.UID)))
 
-	return &planapi.Plan{
-		Files: []planapi.File{
+	return &plan.Plan{
+		Files: []plan.File{
 			ops.IdempotentScriptFile(provisioningDir),
 			{
 				Content: base64.StdEncoding.EncodeToString([]byte(nodeCleanupScript)),
@@ -1235,7 +1354,7 @@ func buildPostRestoreNodeCleanupPlan(s *scope, initSecret *corev1.Secret, allSec
 				Dynamic: true,
 			},
 		},
-		OneTimeInstructions: []planapi.OneTimeInstruction{
+		OneTimeInstructions: []plan.OneTimeInstruction{
 			ops.IdempotentInstruction(provisioningDir, idempotencyKey+"/cleanup-nodes", value, "/bin/sh",
 				[]string{cleanupScriptPath, nodeNamesPath},
 				[]string{
@@ -1284,10 +1403,10 @@ func (h *handler) reconcilePostRestoreNodeCleanup(s *scope, status opv1alpha1.ET
 		return status, nil
 	}
 
-	allSecrets, err := planapi.NewCollector(h.secrets, s.clusterObj, s.namespace).
-		WithSorter(planapi.DefaultSorter()).
+	allSecrets, err := plan.NewCollector(h.secrets, s.clusterObj, s.namespace).
+		WithSorter(plan.DefaultSorter()).
 		Collect()
-	if planapi.IsTransient(err) {
+	if plan.IsTransient(err) {
 		return status, err
 	} else if err != nil {
 		logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as failed: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
@@ -1325,12 +1444,12 @@ func (h *handler) reconcilePostRestoreNodeCleanup(s *scope, status opv1alpha1.ET
 		return status, nil
 	}
 
-	if wait, msg := planStatus.Wait(); wait {
-		logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for node cleanup: %s", s.op.Namespace, s.op.Name, msg)
+	if planStatus.Waiting() {
+		logrus.Infof("[etcdsnapshotrestore] %s/%s: waiting for node cleanup for %s/%s", s.op.Namespace, s.op.Name, initSecret.Namespace, initSecret.Name)
 
 		opv1alpha1.InProgressCondition.True(&status)
 		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-		opv1alpha1.InProgressCondition.Message(&status, msg)
+		opv1alpha1.InProgressCondition.Message(&status, plan.Message([]plan.PlanStatus{*planStatus}))
 
 		return status, nil
 	}
@@ -1358,12 +1477,12 @@ func (h *handler) handleCanceled(s *scope, status opv1alpha1.ETCDSnapshotRestore
 		return status, nil
 	}
 
-	if planapi.IsOwningBeaconHolder(s.beacon, ControllerOwnerKey) {
-		s.beacon, err = planapi.ToggleBeacon(s.beacon, false, h.beacons)
+	if plan.IsOwningBeaconHolder(s.beacon, ControllerOwnerKey) {
+		s.beacon, err = plan.ToggleBeacon(s.beacon, false, h.beacons)
 		if err != nil {
 			return status, err
 		}
-		if err := planapi.ReleaseBeacon(s.beacon, h.beacons, ControllerOwnerKey); err != nil {
+		if err := plan.ReleaseBeacon(s.beacon, h.beacons, ControllerOwnerKey); err != nil {
 			return status, err
 		}
 	}
@@ -1386,7 +1505,7 @@ func (h *handler) handleFailed(s *scope, status opv1alpha1.ETCDSnapshotRestoreSt
 		return status, nil
 	}
 
-	if err := planapi.ReleaseBeacon(s.beacon, h.beacons, ControllerOwnerKey); err != nil {
+	if err := plan.ReleaseBeacon(s.beacon, h.beacons, ControllerOwnerKey); err != nil {
 		return status, err
 	}
 	return status, nil
@@ -1408,13 +1527,13 @@ func (h *handler) handleSucceeded(s *scope, status opv1alpha1.ETCDSnapshotRestor
 		return status, nil
 	}
 
-	if planapi.AuthorizedForBeacon(s.beacon, ControllerOwnerKey) {
-		s.beacon, err = planapi.ToggleBeacon(s.beacon, false, h.beacons)
+	if plan.AuthorizedForBeacon(s.beacon, ControllerOwnerKey) {
+		s.beacon, err = plan.ToggleBeacon(s.beacon, false, h.beacons)
 		if err != nil {
 			return status, err
 		}
 
-		if err := planapi.ReleaseBeacon(s.beacon, h.beacons, ControllerOwnerKey); err != nil {
+		if err := plan.ReleaseBeacon(s.beacon, h.beacons, ControllerOwnerKey); err != nil {
 			return status, err
 		}
 

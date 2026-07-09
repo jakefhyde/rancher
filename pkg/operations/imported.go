@@ -6,6 +6,7 @@ import (
 
 	mgmtv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/capr"
+	provcluster "github.com/rancher/rancher/pkg/controllers/provisioningv2/cluster"
 	"github.com/rancher/rancher/pkg/plan"
 	planv1alpha1 "github.com/rancher/rancher/pkg/plan/api/plan.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/wrangler"
@@ -20,11 +21,36 @@ import (
 )
 
 func init() {
-	RegisterAdapter(mgmtv3.SchemeGroupVersion.WithKind("Cluster"), func(clients *wrangler.CAPIContext, unstructured *unstructured.Unstructured) (Adapter, error) {
+	// The Rancher UI creates day-2 operations with ClusterRef pointing at the mgmtv3.Cluster
+	// (cluster-scoped, unique per user-facing cluster) regardless of the underlying
+	// provisioner. This factory is where that ClusterRef is resolved to the right adapter:
+	//
+	//   - Turtles-imported CAPI cluster: mgmt cluster carries
+	//     cluster-api.cattle.io/capi-cluster-owner{,-ns} labels naming the real CAPI Cluster.
+	//     Load it and dispatch via capiClusterAdapter → CAPRAdapter or CAPRKE2Adapter.
+	//
+	//   - v2prov-administrated cluster (custom + node-driver): mgmt cluster carries the
+	//     provisioning.cattle.io/administrated=true annotation. Trace mgmt → provv1.Cluster
+	//     (via the ByCluster index) → CAPI Cluster in the provv1 namespace, then dispatch via
+	//     capiClusterAdapter. This is CAPR.
+	//
+	//   - Generic imported RKE2/K3s (no turtles labels, no administrated annotation): fall
+	//     through to ImportedAdapter.
+	//
+	// The mgmtv3.Cluster GVK is registered here because it is the *user-facing* handle for
+	// every cluster type. capr.go and capi.go still register their native GVKs (provv1.Cluster,
+	// capi.Cluster, RKEControlPlane) for direct-ref callers.
+	RegisterAdapter(mgmtv3.SchemeGroupVersion.WithKind("Cluster"), func(clients *wrangler.CAPIContext, ustr *unstructured.Unstructured) (Adapter, error) {
 		var cluster *mgmtv3.Cluster
-		err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructured.Object, &cluster)
-		if err != nil {
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(ustr.Object, &cluster); err != nil {
 			return nil, err
+		}
+
+		if adapter, err := turtlesCAPIAdapter(clients, cluster); adapter != nil || err != nil {
+			return adapter, err
+		}
+		if adapter, err := administratedCAPIAdapter(clients, cluster); adapter != nil || err != nil {
+			return adapter, err
 		}
 
 		return &ImportedAdapter{
@@ -34,8 +60,69 @@ func init() {
 	})
 }
 
+// turtlesCAPIAdapter returns a CAPI-backed adapter when cluster is a turtles-imported CAPI
+// cluster shell — identified by the presence of both the capi-cluster-owner and -owner-ns
+// labels. Returns (nil, nil) when the labels are absent (caller should try the next dispatch).
+// One label present without the other is a misconfiguration and returns an error rather than
+// silently falling through — matches the identity-resolver behaviour in the config server.
+func turtlesCAPIAdapter(clients *wrangler.CAPIContext, cluster *mgmtv3.Cluster) (Adapter, error) {
+	ownerName := cluster.Labels[capr.CAPIClusterOwnerLabel]
+	ownerNS := cluster.Labels[capr.CAPIClusterOwnerNSLabel]
+	if (ownerName == "") != (ownerNS == "") {
+		return nil, fmt.Errorf(
+			"mgmt cluster %s carries only one of %s/%s; both must be set for a turtles-imported CAPI cluster",
+			cluster.Name, capr.CAPIClusterOwnerLabel, capr.CAPIClusterOwnerNSLabel)
+	}
+	if ownerName == "" {
+		return nil, nil
+	}
+	capiCluster, err := clients.CAPI.Cluster().Cache().Get(ownerNS, ownerName)
+	if err != nil {
+		return nil, fmt.Errorf("mgmt cluster %s references CAPI cluster %s/%s: %w",
+			cluster.Name, ownerNS, ownerName, err)
+	}
+	return capiClusterAdapter(clients, capiCluster)
+}
+
+// administratedCAPIAdapter returns a CAPR adapter when cluster is a v2prov-administrated shell —
+// identified by the provisioning.cattle.io/administrated=true annotation. Traces the mgmt
+// cluster → provv1.Cluster (via the ByCluster index) → CAPI Cluster and dispatches via
+// capiClusterAdapter. Returns (nil, nil) when the annotation is not set.
+func administratedCAPIAdapter(clients *wrangler.CAPIContext, cluster *mgmtv3.Cluster) (Adapter, error) {
+	if cluster.Annotations["provisioning.cattle.io/administrated"] != "true" {
+		return nil, nil
+	}
+	provClusters, err := clients.Provisioning.Cluster().Cache().GetByIndex(provcluster.ByCluster, cluster.Name)
+	if err != nil {
+		return nil, fmt.Errorf("finding provisioning cluster for mgmt cluster %s: %w", cluster.Name, err)
+	}
+	if len(provClusters) != 1 {
+		return nil, fmt.Errorf("expected exactly 1 provisioning cluster for mgmt cluster %s, got %d",
+			cluster.Name, len(provClusters))
+	}
+	prov := provClusters[0]
+	capiCluster, err := clients.CAPI.Cluster().Cache().Get(prov.Namespace, prov.Name)
+	if err != nil {
+		return nil, fmt.Errorf("finding CAPI cluster %s/%s for administrated mgmt cluster %s: %w",
+			prov.Namespace, prov.Name, cluster.Name, err)
+	}
+	return capiClusterAdapter(clients, capiCluster)
+}
+
+// BeaconRef returns the mgmt v3 Cluster's name-as-namespace + name convention. The mgmt v3
+// Cluster is cluster-scoped, but its per-cluster namespace on the local cluster is named after
+// the cluster itself and hosts every downstream artifact (mgmt v3 Nodes, beacons, machine-plan
+// secrets stamped by systemagent, etc.).
+func (a *ImportedAdapter) BeaconRef() (string, string) {
+	return a.cluster.Name, a.cluster.Name
+}
+
 func (a *ImportedAdapter) LoopbackAddress(_ *corev1.Secret) string {
 	return "127.0.0.1"
+}
+
+func (a *ImportedAdapter) ConfigFile(_ *corev1.Secret) string {
+	return fmt.Sprintf("/etc/rancher/%s/config.yaml", a.RuntimeCommand())
 }
 
 func (a *ImportedAdapter) ConfigDirectory(_ *corev1.Secret) string {

@@ -28,6 +28,10 @@ type ETCDSnapshotSaveSpec struct {
 type ETCDSnapshotSaveStep string
 
 const (
+	// ETCDSnapshotSaveStepPreflight indicates the step is performing preflight checks to determine if the operation
+	// will succeed.
+	ETCDSnapshotSaveStepPreflight ETCDSnapshotSaveStep = "Preflight"
+
 	// ETCDSnapshotSaveStepSave indicates the step is to save the snapshot.
 	ETCDSnapshotSaveStepSave ETCDSnapshotSaveStep = "Save"
 
@@ -42,7 +46,7 @@ type ETCDSnapshotSaveStatus struct {
 
 	// Step is the current step of the operation.
 	// Step is typically only valid during the InProgress phase.
-	// +kubebuilder:validation:Enum=Save;Restart
+	// +kubebuilder:validation:Enum=Preflight;Save;Restart
 	// +optional
 	Step ETCDSnapshotSaveStep `json:"step,omitempty"`
 }

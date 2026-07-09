@@ -23,7 +23,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -161,28 +160,19 @@ func (h *handler) onChange(op *opv1alpha1.EncryptionKeyRotation, status opv1alph
 
 	ustr := unstructured.Unstructured{Object: ustrMap}
 
-	namespace := op.Spec.ClusterRef.Namespace
-	if namespace == "" {
-		mapping, err := h.clients.RESTMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-		if err != nil {
-			return status, err
-		}
-		if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-			namespace = op.Namespace
-		} else {
-			// cluster-scoped objects: beacon namespace is the name of the object
-			namespace = op.Spec.ClusterRef.Name
-		}
+	adapter, err := ops.NewAdapter(h.clients, &ustr)
+	if err != nil {
+		return status, err
 	}
 
-	beacon, err := h.beacons.Get(namespace, ustr.GetName(), metav1.GetOptions{})
+	// Resolve the beacon via the adapter, not op.Spec.ClusterRef. See
+	// etcdsnapshotrestore/controller.go for the full rationale.
+	namespace, beaconName := adapter.BeaconRef()
+
+	beacon, err := h.beacons.Get(namespace, beaconName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) && status.Phase == opv1alpha1.OperationPhasePending {
-		key := fmt.Sprintf("apiVersion=%s, kind=%s", ustr.GetAPIVersion(), ustr.GetKind())
-		if ustr.GetNamespace() != "" {
-			key += fmt.Sprintf(", namespace=%s", ustr.GetNamespace())
-		}
-		key += fmt.Sprintf(", name=%s", ustr.GetName())
-		logrus.Warnf("[encryptionkeyrotation]: %s/%s failed to find beacon for %s", op.Namespace, op.Name, key)
+		logrus.Warnf("[encryptionkeyrotation]: %s/%s failed to find beacon %s/%s (clusterRef apiVersion=%s kind=%s name=%s)",
+			op.Namespace, op.Name, namespace, beaconName, ustr.GetAPIVersion(), ustr.GetKind(), ustr.GetName())
 
 		opv1alpha1.PendingCondition.True(&status)
 		opv1alpha1.PendingCondition.Reason(&status, opv1alpha1.WaitingForBeaconReason)
@@ -190,11 +180,6 @@ func (h *handler) onChange(op *opv1alpha1.EncryptionKeyRotation, status opv1alph
 
 		return status, nil
 	} else if err != nil {
-		return status, err
-	}
-
-	adapter, err := ops.NewAdapter(h.clients, &ustr)
-	if err != nil {
 		return status, err
 	}
 
@@ -505,12 +490,12 @@ func (h *handler) reconcileRotate(s *scope, status opv1alpha1.EncryptionKeyRotat
 		return status, nil
 	}
 
-	if wait, msg := planStatus.Wait(); wait {
-		logrus.Debugf("[encryptionkeyrotation] %s/%s: waiting for rotate-keys plan on leader %s: %s", s.op.Namespace, s.op.Name, leader.Name, msg)
+	if planStatus.Waiting() {
+		logrus.Debugf("[encryptionkeyrotation] %s/%s: waiting for rotate-keys plan for %s/%s", s.op.Namespace, s.op.Name, leader.Namespace, leader.Name)
 
 		opv1alpha1.InProgressCondition.True(&status)
 		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-		opv1alpha1.InProgressCondition.Message(&status, msg)
+		opv1alpha1.InProgressCondition.Message(&status, plan.Message([]plan.PlanStatus{*planStatus}))
 
 		return status, nil
 	}
@@ -593,7 +578,7 @@ func (h *handler) reconcileRestart(s *scope, status opv1alpha1.EncryptionKeyRota
 	// Restart order comes from plan.DefaultSorter(): init+etcd first, then
 	// etcd-only, then mixed etcd/control-plane, then control-plane-only. That
 	// keeps etcd nodes ahead of pure control-plane nodes.
-	pool, err := plan.NewCollector(h.secrets, s.clusterObj, s.namespace).
+	secrets, err := plan.NewCollector(h.secrets, s.clusterObj, s.namespace).
 		WithLabels(
 			plan.Label(capr.ClusterNameLabel, s.clusterObj.GetName()),
 			plan.Or(
@@ -611,7 +596,7 @@ func (h *handler) reconcileRestart(s *scope, status opv1alpha1.EncryptionKeyRota
 		markFailed(&status, opv1alpha1.UnknownStepReason, "no control-plane nodes found; cannot verify post-restart encryption status")
 		return status, nil
 	}
-	if !ops.IsControlPlane(pool[len(pool)-1]) {
+	if !ops.IsControlPlane(secrets[len(secrets)-1]) {
 		logrus.Errorf("[encryptionkeyrotation] %s/%s: nodes are not correctly ordered at restart step", s.op.Namespace, s.op.Name)
 		markFailed(&status, opv1alpha1.UnknownStepReason, "last control plane node not found; cannot verify hash convergence after restart")
 		return status, nil
@@ -626,8 +611,8 @@ func (h *handler) reconcileRestart(s *scope, status opv1alpha1.EncryptionKeyRota
 	// hashes match" validation only makes sense after every control-plane node
 	// has restarted; before that, k3s may legitimately report
 	// reencrypt_finished while hashes still differ across servers.
-	for i, secret := range pool {
-		requireHashMatch := i == len(pool)-1
+	for i, secret := range secrets {
+		requireHashMatch := i == len(secrets)-1
 		status, done, err := h.reconcileRestartNode(s, status, secret, env, serverUnit, runtime, requireHashMatch)
 		if err != nil {
 			return status, err
@@ -734,11 +719,11 @@ func (h *handler) reconcileRestartNode(
 		return status, false, nil
 	}
 
-	if wait, msg := planStatus.Wait(); wait {
-		logrus.Debugf("[encryptionkeyrotation] %s/%s: waiting for restart on %s: %s", s.op.Namespace, s.op.Name, secret.Name, msg)
+	if planStatus.Waiting() {
+		logrus.Debugf("[encryptionkeyrotation] %s/%s: waiting for restart for %s/%s", s.op.Namespace, s.op.Name, secret.Namespace, secret.Name)
 		opv1alpha1.InProgressCondition.True(&status)
 		opv1alpha1.InProgressCondition.Reason(&status, opv1alpha1.WaitingForPlanAppliedReason)
-		opv1alpha1.InProgressCondition.Message(&status, fmt.Sprintf("waiting for restart on %s: %s", secret.Name, msg))
+		opv1alpha1.InProgressCondition.Message(&status, plan.Message([]plan.PlanStatus{*planStatus}))
 		return status, false, nil
 	}
 

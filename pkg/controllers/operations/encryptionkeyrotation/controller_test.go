@@ -29,6 +29,8 @@ type stubAdapter struct {
 	pauseCalls         []bool
 }
 
+func (a *stubAdapter) BeaconRef() (string, string) { return "test-namespace", "test-cluster" }
+
 func (a *stubAdapter) WaitForRegister() (bool, error) {
 	return a.waitForRegisterOK, a.waitForRegisterErr
 }
