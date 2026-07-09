@@ -12,12 +12,6 @@ import (
 )
 
 const (
-	//
-	BeaconOwnerLabel = "plan.cattle.io/owner"
-
-	//
-	BeaconDelegateLabel = "plan.cattle.io/delegate"
-
 	// The lifecycle labels identify the cluster and machine objects that own a plan secret
 	// (or a downstream Node). Only Group + Kind + Name are stamped:
 	//   - Version is omitted because a GroupKind uniquely identifies a resource; the API server
@@ -26,13 +20,20 @@ const (
 	//     for resolving the reference. Encoding the namespace in a label would let a plan-secret
 	//     value point at a resource in a different namespace than the secret itself, which is a
 	//     cross-tenant spoofing vector.
-	ClusterLifecycleGroup = "plan.cattle.io/cluster-group"
-	ClusterLifecycleKind  = "plan.cattle.io/cluster-kind"
-	ClusterLifecycleName  = "plan.cattle.io/cluster-name"
 
-	MachineLifecycleGroup = "plan.cattle.io/machine-group"
-	MachineLifecycleKind  = "plan.cattle.io/machine-kind"
-	MachineLifecycleName  = "plan.cattle.io/machine-name"
+	// ClusterLifecycleGroupLabel is the label key for specifying the group of the cluster associated with a plan secret.
+	ClusterLifecycleGroupLabel = "plan.cattle.io/cluster-group"
+	// ClusterLifecycleKindLabel is the label key for specifying the kind of the cluster associated with a plan secret.
+	ClusterLifecycleKindLabel = "plan.cattle.io/cluster-kind"
+	// ClusterLifecycleNameLabel is the label key for specifying the name of the cluster associated with a plan secret.
+	ClusterLifecycleNameLabel = "plan.cattle.io/cluster-name"
+
+	// MachineLifecycleGroupLabel is the label key for specifying the group of the machine associated with a plan secret.
+	MachineLifecycleGroupLabel = "plan.cattle.io/machine-group"
+	// MachineLifecycleKindLabel is the label key for specifying the kind of the machine associated with a plan secret.
+	MachineLifecycleKindLabel = "plan.cattle.io/machine-kind"
+	// MachineLifecycleNameLabel is the label key for specifying the name of the machine associated with a plan secret.
+	MachineLifecycleNameLabel = "plan.cattle.io/machine-name"
 )
 
 // Phase hook label prefixes are the shared "<phase>.phase.hook.operation.cattle.io/" namespace used
@@ -124,9 +125,9 @@ func ObjToMachineLifecycleLabels(obj runtime.Object) (map[string]string, error) 
 	}
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	return map[string]string{
-		MachineLifecycleGroup: gvk.Group,
-		MachineLifecycleKind:  gvk.Kind,
-		MachineLifecycleName:  metaObj.GetName(),
+		MachineLifecycleGroupLabel: gvk.Group,
+		MachineLifecycleKindLabel:  gvk.Kind,
+		MachineLifecycleNameLabel:  metaObj.GetName(),
 	}, nil
 }
 
@@ -139,9 +140,9 @@ func ObjToClusterLifecycleLabels(obj runtime.Object) (map[string]string, error) 
 	}
 	gvk := obj.GetObjectKind().GroupVersionKind()
 	return map[string]string{
-		ClusterLifecycleGroup: gvk.Group,
-		ClusterLifecycleKind:  gvk.Kind,
-		ClusterLifecycleName:  metaObj.GetName(),
+		ClusterLifecycleGroupLabel: gvk.Group,
+		ClusterLifecycleKindLabel:  gvk.Kind,
+		ClusterLifecycleNameLabel:  metaObj.GetName(),
 	}, nil
 }
 
@@ -151,9 +152,9 @@ func HasMachineLifecycleLabels(obj metav1.Object) bool {
 	if labels == nil {
 		return false
 	}
-	return labels[MachineLifecycleGroup] != "" &&
-		labels[MachineLifecycleKind] != "" &&
-		labels[MachineLifecycleName] != ""
+	return labels[MachineLifecycleGroupLabel] != "" &&
+		labels[MachineLifecycleKindLabel] != "" &&
+		labels[MachineLifecycleNameLabel] != ""
 }
 
 // HasClusterLifecycleLabels reports whether obj carries a complete cluster-lifecycle label triple.
@@ -162,9 +163,9 @@ func HasClusterLifecycleLabels(obj metav1.Object) bool {
 	if labels == nil {
 		return false
 	}
-	return labels[ClusterLifecycleGroup] != "" &&
-		labels[ClusterLifecycleKind] != "" &&
-		labels[ClusterLifecycleName] != ""
+	return labels[ClusterLifecycleGroupLabel] != "" &&
+		labels[ClusterLifecycleKindLabel] != "" &&
+		labels[ClusterLifecycleNameLabel] != ""
 }
 
 // ResolveKindStorageVersion asks the discovery-backed RESTMapper for the storage-served
@@ -185,7 +186,7 @@ func ResolveKindStorageVersion(mapper meta.RESTMapper, gk schema.GroupKind) (sch
 // RESTMapper.
 func MachineLifecycleLabelsToObjectReference(obj metav1.Object, contextNamespace string, mapper meta.RESTMapper) (*corev1.ObjectReference, error) {
 	return lifecycleLabelsToObjectReference(obj, contextNamespace, mapper,
-		MachineLifecycleGroup, MachineLifecycleKind, MachineLifecycleName, "machine")
+		MachineLifecycleGroupLabel, MachineLifecycleKindLabel, MachineLifecycleNameLabel, "machine")
 }
 
 // ClusterLifecycleLabelsToObjectReference is the cluster-lifecycle analogue of
@@ -194,7 +195,7 @@ func MachineLifecycleLabelsToObjectReference(obj metav1.Object, contextNamespace
 // contextNamespace.
 func ClusterLifecycleLabelsToObjectReference(obj metav1.Object, contextNamespace string, mapper meta.RESTMapper) (*corev1.ObjectReference, error) {
 	return lifecycleLabelsToObjectReference(obj, contextNamespace, mapper,
-		ClusterLifecycleGroup, ClusterLifecycleKind, ClusterLifecycleName, "cluster")
+		ClusterLifecycleGroupLabel, ClusterLifecycleKindLabel, ClusterLifecycleNameLabel, "cluster")
 }
 
 func lifecycleLabelsToObjectReference(obj metav1.Object, contextNamespace string, mapper meta.RESTMapper, groupKey, kindKey, nameKey, side string) (*corev1.ObjectReference, error) {

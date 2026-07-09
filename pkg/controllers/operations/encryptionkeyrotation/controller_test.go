@@ -71,10 +71,13 @@ func (a *stubAdapter) PauseCluster(paused bool) error {
 	return nil
 }
 
-// The five methods below complete the ops.Adapter contract for the stub. None of them are
+// The six methods below complete the ops.Adapter contract for the stub. None of them are
 // exercised by the encryption-key-rotation controller (which only consumes runtime/dataDir/
 // serverUnit/probes/pause/plans), so each returns a static RKE2-shaped value matching what
 // CAPRAdapter would produce for an rke2 cluster.
+func (a *stubAdapter) ConfigFile(_ *corev1.Secret) string {
+	return "/etc/rancher/rke2/config.yaml"
+}
 func (a *stubAdapter) ConfigDirectory(_ *corev1.Secret) string {
 	return "/etc/rancher/rke2/config.yaml.d"
 }
@@ -125,17 +128,12 @@ func newOp() *opv1alpha1.EncryptionKeyRotation {
 }
 
 func newBeacon(owner string, active bool) *planv1alpha1.Beacon {
-	labels := map[string]string{}
-	if owner != "" {
-		labels[planv1alpha1.BeaconOwnerLabel] = owner
-	}
 	// Beacon ownership lives on Status.Owner; we keep the legacy BeaconOwnerLabel populated so
 	// reclaimStaleBeaconOwnerIfNeeded (which still reads the label) sees a consistent owner.
 	return &planv1alpha1.Beacon{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "fleet-default",
 			Namespace: "fleet-default",
-			Labels:    labels,
 		},
 		Status: planv1alpha1.BeaconStatus{
 			Active: active,
@@ -695,9 +693,9 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fleet-default",
 					Namespace: "fleet-default",
-					Labels: map[string]string{
-						planv1alpha1.BeaconOwnerLabel: beaconOwnerKey(currentOp),
-					},
+				},
+				Status: planv1alpha1.BeaconStatus{
+					Owner: beaconOwnerKey(currentOp),
 				},
 			},
 		},
@@ -707,9 +705,9 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fleet-default",
 					Namespace: "fleet-default",
-					Labels: map[string]string{
-						planv1alpha1.BeaconOwnerLabel: "etcd-snapshot-save",
-					},
+				},
+				Status: planv1alpha1.BeaconStatus{
+					Owner: "etcd-snapshot-save",
 				},
 			},
 		},
@@ -719,12 +717,12 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fleet-default",
 					Namespace: "fleet-default",
-					Labels: map[string]string{
-						planv1alpha1.BeaconOwnerLabel: "encryption-key-rotation-old-owner",
-					},
 					Annotations: map[string]string{
 						beaconOwnerRefAnnotation: "bad-owner-ref",
 					},
+				},
+				Status: planv1alpha1.BeaconStatus{
+					Owner: "encryption-key-rotation-old-owner",
 				},
 			},
 			wantUpdate:       true,
@@ -737,12 +735,12 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fleet-default",
 					Namespace: "fleet-default",
-					Labels: map[string]string{
-						planv1alpha1.BeaconOwnerLabel: "encryption-key-rotation-old-owner",
-					},
 					Annotations: map[string]string{
 						beaconOwnerRefAnnotation: "fleet-default/ekr-old/old-uid",
 					},
+				},
+				Status: planv1alpha1.BeaconStatus{
+					Owner: "encryption-key-rotation-old-owner",
 				},
 			},
 			getFn: func(namespace, name string, opts metav1.GetOptions) (*opv1alpha1.EncryptionKeyRotation, error) {
@@ -758,12 +756,12 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fleet-default",
 					Namespace: "fleet-default",
-					Labels: map[string]string{
-						planv1alpha1.BeaconOwnerLabel: "encryption-key-rotation-old-owner",
-					},
 					Annotations: map[string]string{
 						beaconOwnerRefAnnotation: "fleet-default/ekr-old/old-uid",
 					},
+				},
+				Status: planv1alpha1.BeaconStatus{
+					Owner: "encryption-key-rotation-old-owner",
 				},
 			},
 			getFn: func(namespace, name string, opts metav1.GetOptions) (*opv1alpha1.EncryptionKeyRotation, error) {
@@ -771,7 +769,7 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Name:      name,
-						UID:       types.UID("different-uid"),
+						UID:       "different-uid",
 					},
 					Status: opv1alpha1.EncryptionKeyRotationStatus{
 						OperationStatus: opv1alpha1.OperationStatus{Phase: opv1alpha1.OperationPhaseInProgress},
@@ -788,12 +786,12 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fleet-default",
 					Namespace: "fleet-default",
-					Labels: map[string]string{
-						planv1alpha1.BeaconOwnerLabel: "encryption-key-rotation-old-owner",
-					},
 					Annotations: map[string]string{
 						beaconOwnerRefAnnotation: "fleet-default/ekr-old/old-uid",
 					},
+				},
+				Status: planv1alpha1.BeaconStatus{
+					Owner: "encryption-key-rotation-old-owner",
 				},
 			},
 			getFn: func(namespace, name string, opts metav1.GetOptions) (*opv1alpha1.EncryptionKeyRotation, error) {
@@ -801,7 +799,7 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Name:      name,
-						UID:       types.UID("old-uid"),
+						UID:       "old-uid",
 					},
 					Status: opv1alpha1.EncryptionKeyRotationStatus{
 						OperationStatus: opv1alpha1.OperationStatus{Phase: opv1alpha1.OperationPhaseSucceeded},
@@ -818,12 +816,12 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "fleet-default",
 					Namespace: "fleet-default",
-					Labels: map[string]string{
-						planv1alpha1.BeaconOwnerLabel: "encryption-key-rotation-old-owner",
-					},
 					Annotations: map[string]string{
 						beaconOwnerRefAnnotation: "fleet-default/ekr-old/old-uid",
 					},
+				},
+				Status: planv1alpha1.BeaconStatus{
+					Owner: "encryption-key-rotation-old-owner",
 				},
 			},
 			getFn: func(namespace, name string, opts metav1.GetOptions) (*opv1alpha1.EncryptionKeyRotation, error) {
@@ -831,7 +829,7 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Namespace: namespace,
 						Name:      name,
-						UID:       types.UID("old-uid"),
+						UID:       "old-uid",
 					},
 					Status: opv1alpha1.EncryptionKeyRotationStatus{
 						OperationStatus: opv1alpha1.OperationStatus{Phase: opv1alpha1.OperationPhaseInProgress},
@@ -876,7 +874,7 @@ func TestReclaimStaleBeaconOwnerIfNeeded(t *testing.T) {
 				return
 			}
 
-			owner := s.beacon.Labels[planv1alpha1.BeaconOwnerLabel]
+			owner := s.beacon.Status.Owner
 			if tt.wantOwnerCleared && owner != "" {
 				t.Fatalf("expected owner label cleared, got %q", owner)
 			}

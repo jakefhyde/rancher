@@ -46,9 +46,9 @@ func TestObjToMachineLifecycleLabels(t *testing.T) {
 	got, err := ObjToMachineLifecycleLabels(obj)
 	assert.NoError(t, err)
 	assert.Equal(t, map[string]string{
-		MachineLifecycleGroup: "cluster.x-k8s.io",
-		MachineLifecycleKind:  "Machine",
-		MachineLifecycleName:  "m0",
+		MachineLifecycleGroupLabel: "cluster.x-k8s.io",
+		MachineLifecycleKindLabel:  "Machine",
+		MachineLifecycleNameLabel:  "m0",
 	}, got)
 }
 
@@ -60,17 +60,17 @@ func TestObjToClusterLifecycleLabels(t *testing.T) {
 	got, err := ObjToClusterLifecycleLabels(obj)
 	assert.NoError(t, err)
 	assert.Equal(t, map[string]string{
-		ClusterLifecycleGroup: "management.cattle.io",
-		ClusterLifecycleKind:  "Cluster",
-		ClusterLifecycleName:  "c-abc123",
+		ClusterLifecycleGroupLabel: "management.cattle.io",
+		ClusterLifecycleKindLabel:  "Cluster",
+		ClusterLifecycleNameLabel:  "c-abc123",
 	}, got)
 }
 
 func TestHasMachineLifecycleLabels(t *testing.T) {
 	full := map[string]string{
-		MachineLifecycleGroup: "cluster.x-k8s.io",
-		MachineLifecycleKind:  "Machine",
-		MachineLifecycleName:  "m0",
+		MachineLifecycleGroupLabel: "cluster.x-k8s.io",
+		MachineLifecycleKindLabel:  "Machine",
+		MachineLifecycleNameLabel:  "m0",
 	}
 	for _, tt := range []struct {
 		name   string
@@ -78,9 +78,9 @@ func TestHasMachineLifecycleLabels(t *testing.T) {
 		want   bool
 	}{
 		{"nil labels", nil, false},
-		{"missing group", map[string]string{MachineLifecycleKind: "Machine", MachineLifecycleName: "m0"}, false},
-		{"missing kind", map[string]string{MachineLifecycleGroup: "cluster.x-k8s.io", MachineLifecycleName: "m0"}, false},
-		{"missing name", map[string]string{MachineLifecycleGroup: "cluster.x-k8s.io", MachineLifecycleKind: "Machine"}, false},
+		{"missing group", map[string]string{MachineLifecycleKindLabel: "Machine", MachineLifecycleNameLabel: "m0"}, false},
+		{"missing kind", map[string]string{MachineLifecycleGroupLabel: "cluster.x-k8s.io", MachineLifecycleNameLabel: "m0"}, false},
+		{"missing name", map[string]string{MachineLifecycleGroupLabel: "cluster.x-k8s.io", MachineLifecycleKindLabel: "Machine"}, false},
 		{"all present", full, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -106,9 +106,9 @@ func TestClusterLifecycleLabelsToObjectReference(t *testing.T) {
 		{
 			name: "namespace-scoped kind uses context namespace",
 			labels: map[string]string{
-				ClusterLifecycleGroup: "cluster.x-k8s.io",
-				ClusterLifecycleKind:  "Cluster",
-				ClusterLifecycleName:  "capi-cluster-0",
+				ClusterLifecycleGroupLabel: "cluster.x-k8s.io",
+				ClusterLifecycleKindLabel:  "Cluster",
+				ClusterLifecycleNameLabel:  "capi-cluster-0",
 			},
 			contextNamespace: "capi-ns",
 			wantAPIVersion:   "cluster.x-k8s.io/v1beta2",
@@ -119,9 +119,9 @@ func TestClusterLifecycleLabelsToObjectReference(t *testing.T) {
 		{
 			name: "cluster-scoped kind returns empty namespace regardless of context",
 			labels: map[string]string{
-				ClusterLifecycleGroup: "management.cattle.io",
-				ClusterLifecycleKind:  "Cluster",
-				ClusterLifecycleName:  "c-abc123",
+				ClusterLifecycleGroupLabel: "management.cattle.io",
+				ClusterLifecycleKindLabel:  "Cluster",
+				ClusterLifecycleNameLabel:  "c-abc123",
 			},
 			contextNamespace: "c-abc123",
 			wantAPIVersion:   "management.cattle.io/v3",
@@ -132,9 +132,9 @@ func TestClusterLifecycleLabelsToObjectReference(t *testing.T) {
 		{
 			name: "provisioning.cattle.io Cluster is namespaced",
 			labels: map[string]string{
-				ClusterLifecycleGroup: "provisioning.cattle.io",
-				ClusterLifecycleKind:  "Cluster",
-				ClusterLifecycleName:  "my-cluster",
+				ClusterLifecycleGroupLabel: "provisioning.cattle.io",
+				ClusterLifecycleKindLabel:  "Cluster",
+				ClusterLifecycleNameLabel:  "my-cluster",
 			},
 			contextNamespace: "fleet-default",
 			wantAPIVersion:   "provisioning.cattle.io/v1",
@@ -145,9 +145,9 @@ func TestClusterLifecycleLabelsToObjectReference(t *testing.T) {
 		{
 			name: "unknown group returns error",
 			labels: map[string]string{
-				ClusterLifecycleGroup: "unregistered.example.com",
-				ClusterLifecycleKind:  "Cluster",
-				ClusterLifecycleName:  "x",
+				ClusterLifecycleGroupLabel: "unregistered.example.com",
+				ClusterLifecycleKindLabel:  "Cluster",
+				ClusterLifecycleNameLabel:  "x",
 			},
 			contextNamespace: "fleet-default",
 			wantErr:          true,
@@ -250,7 +250,7 @@ func TestHasActiveLifecycleHook(t *testing.T) {
 		{
 			name: "hook label mixed with unrelated labels",
 			labels: map[string]string{
-				"app": "rancher",
+				"app":                                  "rancher",
 				SucceededPhaseHookLabelPrefix + "test": "delegate-a",
 				"rke.cattle.io/node-name":              "node-1",
 			},

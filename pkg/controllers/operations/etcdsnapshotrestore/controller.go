@@ -560,7 +560,8 @@ func (h *handler) reconcilePreflight(s *scope, status opv1alpha1.ETCDSnapshotRes
 						Command: "/bin/sh",
 						Args: []string{
 							"-c",
-							fmt.Sprintf("grep -rE -q \"^[[:space:]]*['\\\" ]?token['\\\" ]?[[:space:]]*:[[:space:]]*['\\\" ]*[^[:space:]'\\\"]+\" %s %s/ 2>/dev/null || exit 1)",
+
+							fmt.Sprintf(`grep -rE -q '^[[:space:]]*[\x27\x22 ]?token[\x27\x22 ]?[[:space:]]*:[[:space:]]*[\x27\x22 ]*[^[:space:]\x27\x22]+' %s %s/ 2>/dev/null || (exit 1)`,
 								s.adapter.ConfigFile(secret),
 								s.adapter.ConfigDirectory(secret),
 							),
@@ -804,7 +805,7 @@ func (h *handler) reconcileRestore(s *scope, status opv1alpha1.ETCDSnapshotResto
 				return false
 			}
 
-			if secret.Labels[planv1alpha1.MachineLifecycleName] == ref.Name {
+			if secret.Labels[planv1alpha1.MachineLifecycleNameLabel] == ref.Name {
 				return true
 			}
 

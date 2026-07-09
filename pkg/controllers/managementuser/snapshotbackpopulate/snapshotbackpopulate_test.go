@@ -460,9 +460,9 @@ func TestOnDownstreamChange(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "test-node",
 			Labels: map[string]string{
-				planv1alpha1.MachineLifecycleGroup: "cluster.x-k8s.io",
-				planv1alpha1.MachineLifecycleKind:  "Machine",
-				planv1alpha1.MachineLifecycleName:  "test-machine",
+				planv1alpha1.MachineLifecycleGroupLabel: "cluster.x-k8s.io",
+				planv1alpha1.MachineLifecycleKindLabel:  "Machine",
+				planv1alpha1.MachineLifecycleNameLabel:  "test-machine",
 			},
 		},
 	}
@@ -624,9 +624,9 @@ func TestOnDownstreamChange_RestoreModeAnnotationIsSetCorrectly(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cp-0",
 			Labels: map[string]string{
-				planv1alpha1.MachineLifecycleGroup: "cluster.x-k8s.io",
-				planv1alpha1.MachineLifecycleKind:  "Machine",
-				planv1alpha1.MachineLifecycleName:  "machine-0",
+				planv1alpha1.MachineLifecycleGroupLabel: "cluster.x-k8s.io",
+				planv1alpha1.MachineLifecycleKindLabel:  "Machine",
+				planv1alpha1.MachineLifecycleNameLabel:  "machine-0",
 			},
 		},
 	}
@@ -897,9 +897,9 @@ func TestMachineLifecycleLabelsToObjectReference(t *testing.T) {
 	t.Parallel()
 
 	allLabels := map[string]string{
-		planv1alpha1.MachineLifecycleGroup: "cluster.x-k8s.io",
-		planv1alpha1.MachineLifecycleKind:  "Machine",
-		planv1alpha1.MachineLifecycleName:  "test-machine",
+		planv1alpha1.MachineLifecycleGroupLabel: "cluster.x-k8s.io",
+		planv1alpha1.MachineLifecycleKindLabel:  "Machine",
+		planv1alpha1.MachineLifecycleNameLabel:  "test-machine",
 	}
 
 	drop := func(key string) map[string]string {
@@ -925,20 +925,20 @@ func TestMachineLifecycleLabelsToObjectReference(t *testing.T) {
 		},
 		{
 			name:      "missing kind",
-			labels:    drop(planv1alpha1.MachineLifecycleKind),
+			labels:    drop(planv1alpha1.MachineLifecycleKindLabel),
 			expectErr: true,
 		},
 		{
 			name:      "missing name",
-			labels:    drop(planv1alpha1.MachineLifecycleName),
+			labels:    drop(planv1alpha1.MachineLifecycleNameLabel),
 			expectErr: true,
 		},
 		{
 			name: "unknown group",
 			labels: map[string]string{
-				planv1alpha1.MachineLifecycleGroup: "not.a.real.group",
-				planv1alpha1.MachineLifecycleKind:  "Machine",
-				planv1alpha1.MachineLifecycleName:  "test-machine",
+				planv1alpha1.MachineLifecycleGroupLabel: "not.a.real.group",
+				planv1alpha1.MachineLifecycleKindLabel:  "Machine",
+				planv1alpha1.MachineLifecycleNameLabel:  "test-machine",
 			},
 			contextNamespace: "fleet-default",
 			expectErr:        true,
@@ -957,9 +957,9 @@ func TestMachineLifecycleLabelsToObjectReference(t *testing.T) {
 		{
 			name: "stale namespace label is ignored (spoofing check)",
 			labels: map[string]string{
-				planv1alpha1.MachineLifecycleGroup:                        "cluster.x-k8s.io",
-				planv1alpha1.MachineLifecycleKind:                         "Machine",
-				planv1alpha1.MachineLifecycleName:                         "test-machine",
+				planv1alpha1.MachineLifecycleGroupLabel:                   "cluster.x-k8s.io",
+				planv1alpha1.MachineLifecycleKindLabel:                    "Machine",
+				planv1alpha1.MachineLifecycleNameLabel:                    "test-machine",
 				"plan.cattle.io/machine-namespace-legacy-ignored-by-code": "other-tenant-ns",
 			},
 			contextNamespace: "fleet-default",

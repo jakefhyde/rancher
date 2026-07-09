@@ -118,9 +118,9 @@ func (p *PlanStatus) String() string {
 // Within each bucket, node names are sorted lexicographically to guarantee deterministic outputs.
 //
 // Output string patterns adapt dynamically based on the node count per bucket:
-//  - 1 node: "bucket_text for X"
-//  - 2 nodes: "bucket_text for X & 1 other node"
-//  - 3+ nodes: "bucket_text for X & N other nodes"
+//   - 1 node: "bucket_text for X"
+//   - 2 nodes: "bucket_text for X & 1 other node"
+//   - 3+ nodes: "bucket_text for X & N other nodes"
 //
 // If multiple statuses are present across the cluster, their resulting summary strings are joined
 // with a comma and space, ordered by the phase priority listed above. Returns an empty string if
@@ -288,7 +288,9 @@ func (s *Store) AssignPlan(secret *corev1.Secret, plan *Plan, maxFailures, failu
 		secret.Annotations = map[string]string{}
 	}
 
-	result := &PlanStatus{}
+	result := &PlanStatus{
+		Secret: secret,
+	}
 
 	if !bytes.Equal(secret.Data["plan"], data) {
 		result.Pending = true

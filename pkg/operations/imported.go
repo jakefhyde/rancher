@@ -220,7 +220,7 @@ func (a *ImportedAdapter) WaitForRegister() (bool, error) {
 			return false, nil
 		}
 
-		machineName, exists := secret.Labels[capr.MachineNameLabel]
+		machineName, exists := secret.Labels[planv1alpha1.MachineLifecycleNameLabel]
 
 		// If the label is missing, or it maps to a machine name we haven't seen/already matched
 		if !exists || !expectedMachines[machineName] {

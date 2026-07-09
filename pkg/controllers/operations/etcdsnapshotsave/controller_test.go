@@ -59,11 +59,13 @@ func (a *stubAdapter) FindOrElectLeader(_ string, _ ops.Filter) (*corev1.Secret,
 	return nil, nil
 }
 
-// The five methods below complete the ops.Adapter contract for the stub. They are not exercised
+// The six methods below complete the ops.Adapter contract for the stub. They are not exercised
 // by the snapshot-save controller (which only consumes runtime/dataDir/serverUnit/probes/plans),
 // so each returns a static, runtime-appropriate value.
+func (a *stubAdapter) ConfigFile(_ *corev1.Secret) string {
+	return "/etc/rancher/" + a.runtimeCommand + "/config.yaml"
+}
 func (a *stubAdapter) ConfigDirectory(_ *corev1.Secret) string {
-	// Mirrors CAPRAdapter.ConfigDirectory's format: /etc/rancher/<runtime>/config.yaml.d.
 	return "/etc/rancher/" + a.runtimeCommand + "/config.yaml.d"
 }
 func (a *stubAdapter) GetServerURL(_ *corev1.Secret) string      { return "" }
@@ -142,10 +144,6 @@ func newOp() *opv1alpha1.ETCDSnapshotSave {
 }
 
 func newBeacon(owner string, active bool) *planv1alpha1.Beacon {
-	lbls := map[string]string{}
-	if owner != "" {
-		lbls[planv1alpha1.BeaconOwnerLabel] = owner
-	}
 	// Beacon ownership lives on Status.Owner (the plan.AcquireBeacon helper writes there).
 	// We populate the legacy BeaconOwnerLabel too so any caller that still reads it (e.g.
 	// EncryptionKeyRotation's reclaimStaleBeaconOwnerIfNeeded) keeps working.
@@ -153,7 +151,6 @@ func newBeacon(owner string, active bool) *planv1alpha1.Beacon {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test",
 			Namespace: "fleet-default",
-			Labels:    lbls,
 		},
 		Status: planv1alpha1.BeaconStatus{
 			Active: active,

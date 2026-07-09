@@ -227,72 +227,73 @@ func (h *handler) createMachinePlanForImported(secret *corev1.Secret, data data.
 	}
 	var machine *apimgmtv3.Node
 
-	if val := data.String("node-name"); val != "" {
-		labels[capr.NodeNameLabel] = val
-
-		machines, err := h.mgmtNodeCache.List(secret.Namespace, apilabels.SelectorFromSet(map[string]string{"management.cattle.io/nodename": val}))
-		if err != nil {
-			return nil, err
-		}
-		if len(machines) != 1 {
-			return nil, fmt.Errorf("expected exactly one machine, but got %d", len(machines))
-		}
-
-		machine = machines[0].DeepCopy()
-		if machine.Labels == nil {
-			machine.Labels = map[string]string{}
-		}
-		machine.Labels[capr.MachineIDLabel] = data.String("id")
-
-		if machine.Spec.Etcd {
-			labels[capr.EtcdRoleLabel] = "true"
-		}
-
-		if machine.Spec.ControlPlane {
-			labels[capr.ControlPlaneRoleLabel] = "true"
-		}
-
-		if machine.Spec.Worker {
-			labels[capr.WorkerRoleLabel] = "true"
-		}
-
-		// if no labels set, assume worker
-		if labels[capr.EtcdRoleLabel] != "true" && labels[capr.ControlPlaneRoleLabel] != "true" {
-			labels[capr.WorkerRoleLabel] = "true"
-		}
-
-		machine, err = h.mgmtNodeClient.Update(machine)
-		if err != nil {
-			return nil, err
-		}
-
-		// copy cluster lifecycle labels to secret
-		lifecycleLabels, err := planv1alpha1.ObjToClusterLifecycleLabels(cluster)
-		if err != nil {
-			return nil, err
-		}
-
-		for k, v := range lifecycleLabels {
-			labels[k] = v
-		}
-
-		// copy machine lifecycle labels to secret
-		lifecycleLabels, err = planv1alpha1.ObjToMachineLifecycleLabels(machine)
-		if err != nil {
-			return nil, err
-		}
-
-		for k, v := range lifecycleLabels {
-			labels[k] = v
-		}
-
-		labels[capr.MachineIDLabel] = data.String("id")
-		labels[capr.MachineNamespaceLabel] = machine.Namespace
-		labels[capr.MachineNameLabel] = machine.Name
-		labels[capr.ClusterNameLabel] = machine.Namespace
-	} else {
+	val := data.String("node-name")
+	if val == "" {
 		return nil, fmt.Errorf("node name not found in secret")
 	}
+
+	labels[capr.NodeNameLabel] = val
+
+	machines, err := h.mgmtNodeCache.List(secret.Namespace, apilabels.SelectorFromSet(map[string]string{"management.cattle.io/nodename": val}))
+	if err != nil {
+		return nil, err
+	}
+	if len(machines) != 1 {
+		return nil, fmt.Errorf("expected exactly one machine, but got %d", len(machines))
+	}
+
+	machine = machines[0].DeepCopy()
+	if machine.Labels == nil {
+		machine.Labels = map[string]string{}
+	}
+	machine.Labels[capr.MachineIDLabel] = data.String("id")
+
+	if machine.Spec.Etcd {
+		labels[capr.EtcdRoleLabel] = "true"
+	}
+
+	if machine.Spec.ControlPlane {
+		labels[capr.ControlPlaneRoleLabel] = "true"
+	}
+
+	if machine.Spec.Worker {
+		labels[capr.WorkerRoleLabel] = "true"
+	}
+
+	// if no labels set, assume worker
+	if labels[capr.EtcdRoleLabel] != "true" && labels[capr.ControlPlaneRoleLabel] != "true" {
+		labels[capr.WorkerRoleLabel] = "true"
+	}
+
+	machine, err = h.mgmtNodeClient.Update(machine)
+	if err != nil {
+		return nil, err
+	}
+
+	// copy cluster lifecycle labels to secret
+	lifecycleLabels, err := planv1alpha1.ObjToClusterLifecycleLabels(cluster)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range lifecycleLabels {
+		labels[k] = v
+	}
+
+	// copy machine lifecycle labels to secret
+	lifecycleLabels, err = planv1alpha1.ObjToMachineLifecycleLabels(machine)
+	if err != nil {
+		return nil, err
+	}
+
+	for k, v := range lifecycleLabels {
+		labels[k] = v
+	}
+
+	labels[capr.MachineIDLabel] = data.String("id")
+	labels[capr.MachineNamespaceLabel] = machine.Namespace
+	labels[capr.MachineNameLabel] = machine.Name
+	labels[capr.ClusterNameLabel] = machine.Namespace
 
 	if address := data.String("address"); address != "" {
 		annotations[capr.AddressAnnotation] = address
@@ -304,10 +305,20 @@ func (h *handler) createMachinePlanForImported(secret *corev1.Secret, data data.
 
 	planSecretName := name.SafeConcatName(secret.Name, "machine", "plan")
 
+	machineOwnerRef := metav1.OwnerReference{
+		APIVersion:         machine.APIVersion,
+		Kind:               machine.Kind,
+		Name:               machine.Name,
+		UID:                machine.UID,
+		Controller:         ptr.To(true),
+		BlockOwnerDeletion: ptr.To(true),
+	}
+
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      planSecretName,
-			Namespace: secret.Namespace,
+			Name:            planSecretName,
+			Namespace:       secret.Namespace,
+			OwnerReferences: []metav1.OwnerReference{machineOwnerRef},
 			Labels: map[string]string{
 				capr.RoleLabel:             capr.RolePlan,
 				capr.PlanSecret:            planSecretName,
@@ -320,17 +331,19 @@ func (h *handler) createMachinePlanForImported(secret *corev1.Secret, data data.
 	}
 	planSecret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:        planSecretName,
-			Namespace:   secret.Namespace,
-			Labels:      labels,
-			Annotations: annotations,
+			Name:            planSecretName,
+			Namespace:       secret.Namespace,
+			Labels:          labels,
+			Annotations:     annotations,
+			OwnerReferences: []metav1.OwnerReference{machineOwnerRef},
 		},
 		Type: capr.SecretTypeMachinePlan,
 	}
 	role := &rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      planSecretName,
-			Namespace: secret.Namespace,
+			Name:            planSecretName,
+			Namespace:       secret.Namespace,
+			OwnerReferences: []metav1.OwnerReference{machineOwnerRef},
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
@@ -345,6 +358,7 @@ func (h *handler) createMachinePlanForImported(secret *corev1.Secret, data data.
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      planSecretName,
 			Namespace: secret.Namespace,
+			OwnerReferences: []metav1.OwnerReference{machineOwnerRef},
 		},
 		Subjects: []rbacv1.Subject{
 			{

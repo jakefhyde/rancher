@@ -6,8 +6,8 @@ import (
 	"path"
 	"strings"
 
-	"github.com/rancher/rancher/pkg/capr"
 	"github.com/rancher/rancher/pkg/plan"
+	planv1alpha1 "github.com/rancher/rancher/pkg/plan/api/plan.cattle.io/v1alpha1"
 	"github.com/rancher/rancher/pkg/wrangler"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -288,5 +288,5 @@ func MachineName(secret *corev1.Secret) string {
 	if secret == nil || secret.Labels == nil {
 		return ""
 	}
-	return secret.Labels[capr.MachineNameLabel]
+	return secret.Labels[planv1alpha1.MachineLifecycleNameLabel]
 }

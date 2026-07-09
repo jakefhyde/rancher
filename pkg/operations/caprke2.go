@@ -123,9 +123,9 @@ func (a *CAPRKE2Adapter) GetSupervisorPort(_ *corev1.Secret) string {
 // the system-agent's plan-secret labeling is operation-package-agnostic.
 func (a *CAPRKE2Adapter) WaitForRegister() (bool, error) {
 	labelSelector := fmt.Sprintf("%s=%s,%s=%s,%s=%s",
-		planv1alpha1.ClusterLifecycleGroup, capiv1beta2.GroupVersion.Group,
-		planv1alpha1.ClusterLifecycleKind, "Cluster",
-		planv1alpha1.ClusterLifecycleName, a.cluster.Name)
+		planv1alpha1.ClusterLifecycleGroupLabel, capiv1beta2.GroupVersion.Group,
+		planv1alpha1.ClusterLifecycleKindLabel, "Cluster",
+		planv1alpha1.ClusterLifecycleNameLabel, a.cluster.Name)
 	secretList, err := a.clients.Core.Secret().List(a.cluster.Namespace, metav1.ListOptions{
 		LabelSelector: labelSelector,
 		FieldSelector: fmt.Sprintf("type=%s", capr.SecretTypeMachinePlan),
@@ -157,7 +157,7 @@ func (a *CAPRKE2Adapter) WaitForRegister() (bool, error) {
 		if secret.Labels == nil {
 			return false, nil
 		}
-		machineName, exists := secret.Labels[capr.MachineNameLabel]
+		machineName, exists := secret.Labels[planv1alpha1.MachineLifecycleNameLabel]
 		if !exists || !expectedMachines[machineName] {
 			return false, nil
 		}

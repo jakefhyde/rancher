@@ -401,7 +401,7 @@ func (h *handler) handleInProgress(s *scope, status opv1alpha1.ETCDSnapshotSaveS
 }
 
 func (h *handler) reconcilePreflight(s *scope, status opv1alpha1.ETCDSnapshotSaveStatus) (opv1alpha1.ETCDSnapshotSaveStatus, error) {
-	logrus.Debugf("[etcdsnapshotrestore] %s/%s: handling shutdown", s.op.Namespace, s.op.Name)
+	logrus.Debugf("[etcdsnapshotsave] %s/%s: handling preflight", s.op.Namespace, s.op.Name)
 
 	delegated, err := h.handleHook(s, PreflightStepHookLabelPrefix)
 	if err != nil {
@@ -421,7 +421,7 @@ func (h *handler) reconcilePreflight(s *scope, status opv1alpha1.ETCDSnapshotSav
 	if plan.IsTransient(err) {
 		return status, err
 	} else if err != nil {
-		logrus.Errorf("[etcdsnapshotrestore] %s/%s: marking operation as canceled: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
+		logrus.Errorf("[etcdsnapshotsave] %s/%s: marking operation as canceled: encountered terminal error collecting machine-plan secrets: %v", s.op.Namespace, s.op.Name, err)
 
 		status.SetPhase(opv1alpha1.OperationPhaseCanceled)
 
@@ -443,7 +443,7 @@ func (h *handler) reconcilePreflight(s *scope, status opv1alpha1.ETCDSnapshotSav
 						Command: "/bin/sh",
 						Args: []string{
 							"-c",
-							fmt.Sprintf("grep -rE -q \"^[[:space:]]*['\\\" ]?token['\\\" ]?[[:space:]]*:[[:space:]]*['\\\" ]*[^[:space:]'\\\"]+\" %s %s/ 2>/dev/null || exit 1)",
+							fmt.Sprintf(`grep -rE -q '^[[:space:]]*[\x27\x22 ]?token[\x27\x22 ]?[[:space:]]*:[[:space:]]*[\x27\x22 ]*[^[:space:]\x27\x22]+' %s %s/ 2>/dev/null || (exit 1)`,
 								s.adapter.ConfigFile(secret),
 								s.adapter.ConfigDirectory(secret),
 							),
