@@ -60,7 +60,7 @@ type desiredKey struct {
 
 type desired struct {
 	key           desiredKey
-	values        map[string]interface{}
+	values        map[string]any
 	takeOwnership bool
 }
 
@@ -95,7 +95,7 @@ type Manager struct {
 	// called from the systemcharts controller goroutine while runSync reads and writes the same
 	// map. See the note on runSync.
 	desiredMu     sync.RWMutex
-	desiredCharts map[desiredKey]map[string]interface{}
+	desiredCharts map[desiredKey]map[string]any
 
 	sync                  chan desired
 	refreshIntervalChange chan struct{}
@@ -119,7 +119,7 @@ func NewManager(ctx context.Context,
 		content:               contentManager,
 		pods:                  pods,
 		sync:                  make(chan desired, 10),
-		desiredCharts:         map[desiredKey]map[string]interface{}{},
+		desiredCharts:         map[desiredKey]map[string]any{},
 		refreshIntervalChange: make(chan struct{}, 1),
 		settings:              settings,
 		trigger:               make(chan struct{}, 1),
@@ -231,7 +231,7 @@ func (m *Manager) runSync() {
 
 			err := m.installOne(d.key, d.values, d.takeOwnership)
 			select {
-			case results <- installResult{key: d.key, values: d.values, err: err}:
+			case results <- installResult{key: d.key, values: d.values, err: err, takeOwnership: d.takeOwnership}:
 			case <-m.ctx.Done():
 			}
 		}()
@@ -281,7 +281,7 @@ func (m *Manager) runSync() {
 				// the webhook is not serving yet, the index has not been built, the API server is
 				// rolling — and dropping a system chart on the floor until the next ClusterRepo
 				// event (up to an hour later) has broken provisioning before.
-				backoff, attempts := retries.failed(r.key, r.values, time.Now())
+				backoff, attempts := retries.failed(r.key, r.values, time.Now(), r.takeOwnership)
 				logrus.Infof("Retrying system chart %s in %s (attempt %d)", r.key.chartName, backoff, attempts)
 			}
 
@@ -329,14 +329,14 @@ func (q *retryQueue) park(d desired, at time.Time) bool {
 // The attempt count is cumulative across retries: an entry stays in the queue while its install
 // is in flight precisely so that repeated failures back off further each time instead of retrying
 // every installRetryBaseDelay forever.
-func (q *retryQueue) failed(key desiredKey, values map[string]interface{}, now time.Time) (time.Duration, int) {
+func (q *retryQueue) failed(key desiredKey, values map[string]any, now time.Time, takeOwnership bool) (time.Duration, int) {
 	p, ok := q.pending[key]
 	if !ok {
 		p = &pendingInstall{}
 		q.pending[key] = p
 	}
 
-	p.desired = desired{key: key, values: values, takeOwnership: true}
+	p.desired = desired{key: key, values: values, takeOwnership: takeOwnership}
 	p.attempts++
 	backoff := installBackoff(p.attempts)
 	p.nextAt = now.Add(backoff)
@@ -394,7 +394,7 @@ func isIndexNotReady(err error) bool {
 
 // installOne installs a single chart and logs the outcome. Any error is returned so runSync
 // schedules a retry rather than recording the chart as installed.
-func (m *Manager) installOne(key desiredKey, values map[string]interface{}, takeOwnership bool) error {
+func (m *Manager) installOne(key desiredKey, values map[string]any, takeOwnership bool) error {
 	err := m.install(key.namespace, key.chartName, key.releaseName, key.minVersion, key.exactVersion, values, takeOwnership, key.installImageOverride)
 	switch {
 	case err == nil:
@@ -442,7 +442,7 @@ func (m *Manager) Uninstall(namespace, name string) error {
 // system-upgrade-controller, and the webhook should go first — and a goroutine per call
 // randomised that. The channel is buffered and runSync no longer blocks on installs, so sending
 // here does not stall the calling controller.
-func (m *Manager) Ensure(namespace, chartName, releaseName, minVersion, exactVersion string, values map[string]interface{}, takeOwnership bool, installImageOverride string) error {
+func (m *Manager) Ensure(namespace, chartName, releaseName, minVersion, exactVersion string, values map[string]any, takeOwnership bool, installImageOverride string) error {
 	d := desired{
 		key: desiredKey{
 			namespace:            namespace,
@@ -481,7 +481,7 @@ func (m *Manager) Remove(namespace, releaseName string) {
 
 // desiredValues returns the values a chart was last installed with, and whether it is recorded
 // as installed at all.
-func (m *Manager) desiredValues(key desiredKey) (map[string]interface{}, bool) {
+func (m *Manager) desiredValues(key desiredKey) (map[string]any, bool) {
 	m.desiredMu.RLock()
 	defer m.desiredMu.RUnlock()
 
@@ -490,7 +490,7 @@ func (m *Manager) desiredValues(key desiredKey) (map[string]interface{}, bool) {
 }
 
 // setDesired records a chart as installed with the given values.
-func (m *Manager) setDesired(key desiredKey, values map[string]interface{}) {
+func (m *Manager) setDesired(key desiredKey, values map[string]any) {
 	m.desiredMu.Lock()
 	defer m.desiredMu.Unlock()
 
@@ -519,7 +519,7 @@ func (m *Manager) listDesired() []desired {
 // If no version is provided, it will try to install the latest version available.
 // If a release with the version to be installed is already installed, or is pending install, upgrade or rollback, this
 // does nothing.
-func (m *Manager) install(namespace, chartName, releaseName, minVersion, exactVersion string, values map[string]interface{}, takeOwnership bool, installImageOverride string) error {
+func (m *Manager) install(namespace, chartName, releaseName, minVersion, exactVersion string, values map[string]any, takeOwnership bool, installImageOverride string) error {
 	index, err := m.content.Index("", "rancher-charts", "", true)
 	if err != nil {
 		return err
@@ -574,7 +574,7 @@ func (m *Manager) install(namespace, chartName, releaseName, minVersion, exactVe
 	}
 
 	if desiredValue == nil {
-		desiredValue = map[string]interface{}{}
+		desiredValue = map[string]any{}
 	}
 	// if tolerations are already present we don't change them
 	if v, ok := desiredValue["tolerations"]; !ok || v == nil {
@@ -647,9 +647,10 @@ const (
 
 // installResult carries an install's outcome back to runSync, which owns desiredCharts.
 type installResult struct {
-	key    desiredKey
-	values map[string]interface{}
-	err    error
+	key           desiredKey
+	values        map[string]any
+	takeOwnership bool
+	err           error
 }
 
 // operationTimeout returns how long a helm operation pod is allowed to run, which is also
@@ -767,7 +768,7 @@ func podDone(chart string, newPod *v1.Pod) (bool, error) {
 
 // isInstalled gets all releases for a particular namespace and name that has the status action.ListDeployed.
 // It calls the desiredVersionAndValues function with it to return if the chart is installed, the desired version and the desired values for it.
-func (m *Manager) isInstalled(namespace, name, minVersion, desiredVersion string, isExact bool, desiredValue map[string]interface{}) (bool, string, map[string]interface{}, error) {
+func (m *Manager) isInstalled(namespace, name, minVersion, desiredVersion string, isExact bool, desiredValue map[string]any) (bool, string, map[string]any, error) {
 	releases, err := m.helmClient.ListReleases(namespace, name, action.ListDeployed)
 	if err != nil {
 		return false, "", nil, err
@@ -780,17 +781,17 @@ func (m *Manager) isInstalled(namespace, name, minVersion, desiredVersion string
 // Callers must provide the desired version. If isExact is true, then the resulting value is the desiredVersion, which
 // may result in a forced upgrade or downgrade. Otherwise, the desiredVersion signifies the latest version, which may
 // or may not be installed, depending on the value of the min version.
-func desiredVersionAndValues(releases []*release.Release, minVersion, desiredVersion string, isExact bool, desiredValues map[string]any) (bool, string, map[string]interface{}, error) {
+func desiredVersionAndValues(releases []*release.Release, minVersion, desiredVersion string, isExact bool, desiredValues map[string]any) (bool, string, map[string]any, error) {
 	for _, r := range releases {
 		if r.Info.Status != releasecommon.StatusDeployed {
 			continue
 		}
 		if desiredValues == nil {
-			desiredValues = map[string]interface{}{}
+			desiredValues = map[string]any{}
 		}
 		releaseConfig := r.Config
 		if releaseConfig == nil {
-			releaseConfig = map[string]interface{}{}
+			releaseConfig = map[string]any{}
 		}
 
 		desiredValuesJSON, err := json.Marshal(desiredValues)
@@ -808,7 +809,7 @@ func desiredVersionAndValues(releases []*release.Release, minVersion, desiredVer
 			return false, "", nil, err
 		}
 
-		desiredValues = map[string]interface{}{}
+		desiredValues = map[string]any{}
 		if err := json.Unmarshal(patchedJSON, &desiredValues); err != nil {
 			return false, "", nil, err
 		}
