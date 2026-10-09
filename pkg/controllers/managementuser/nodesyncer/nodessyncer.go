@@ -12,19 +12,13 @@ import (
 	"github.com/pkg/errors"
 	cond "github.com/rancher/norman/condition"
 	apimgmtv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
-	rkev1 "github.com/rancher/rancher/pkg/apis/rke.cattle.io/v1"
-	"github.com/rancher/rancher/pkg/capr"
 	"github.com/rancher/rancher/pkg/controllers/managementagent/podresources"
 	"github.com/rancher/rancher/pkg/controllers/managementlegacy/compose/common"
-	capicontrollers "github.com/rancher/rancher/pkg/generated/controllers/cluster.x-k8s.io/v1beta2"
-	provcontrollers "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io/v1"
-	rkecontrollers "github.com/rancher/rancher/pkg/generated/controllers/rke.cattle.io/v1"
 	v3 "github.com/rancher/rancher/pkg/generated/norman/management.cattle.io/v3"
 	nodehelper "github.com/rancher/rancher/pkg/node"
 	"github.com/rancher/rancher/pkg/systemaccount"
 	"github.com/rancher/rancher/pkg/types/config"
 	"github.com/rancher/rancher/pkg/types/config/systemtokens"
-	"github.com/rancher/rancher/pkg/wrangler"
 	corew "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -60,9 +54,6 @@ type nodesSyncer struct {
 	nodeClient           corew.NodeClient
 	clusterNamespace     string
 	clusterLister        v3.ClusterLister
-	provClusterCache     provcontrollers.ClusterCache
-	capiClusterCache     capicontrollers.ClusterCache
-	rkeControlPlaneCache rkecontrollers.RKEControlPlaneCache
 }
 
 type nodeDrain struct {
@@ -79,7 +70,7 @@ type nodeDrain struct {
 	nodesToContext       map[string]context.CancelFunc
 }
 
-func Register(ctx context.Context, cluster *config.UserContext, capi *wrangler.CAPIContext, kubeConfigGetter common.KubeConfigGetter) {
+func Register(ctx context.Context, cluster *config.UserContext, kubeConfigGetter common.KubeConfigGetter) {
 	m := &nodesSyncer{
 		clusterNamespace:     cluster.ClusterName,
 		machines:             cluster.Management.Management.Nodes(cluster.ClusterName),
@@ -87,16 +78,6 @@ func Register(ctx context.Context, cluster *config.UserContext, capi *wrangler.C
 		nodeLister:           cluster.Corew.Node().Cache(),
 		nodeClient:           cluster.Corew.Node(),
 		clusterLister:        cluster.Management.Management.Clusters("").Controller().Lister(),
-		provClusterCache:     cluster.Management.Wrangler.Provisioning.Cluster().Cache(),
-		rkeControlPlaneCache: cluster.Management.Wrangler.RKE.RKEControlPlane().Cache(),
-	}
-
-	// capiClusterCache is optional - only set it if capi context is available
-	// This allows nodesyncer to work for the local cluster even when CAPI CRDs
-	// are not yet established. The capiClusterCache is only used in isClusterRestoring()
-	// which is already skipped for the local cluster.
-	if capi != nil {
-		m.capiClusterCache = capi.CAPI.Cluster().Cache()
 	}
 
 	n := &nodeSyncer{
@@ -258,19 +239,15 @@ func (m *nodesSyncer) sync(key string, _ *apimgmtv3.Node) (runtime.Object, error
 }
 
 func (m *nodesSyncer) reconcileAll() error {
-	// skip reconcile if we are restoring from backup,
-	// this is needed to avoid adding/deleting replaced nodes that might be in the
-	// snapshots before the cluster restore/reconcile is complete
-	if m.clusterNamespace != "local" { // we don't check for local cluster
-		if restoring, err := m.isClusterRestoring(); restoring {
-			return nil
-		} else if err != nil {
-			// if cluster no longer exists; nothing to reconcile
-			if apierrors.IsNotFound(err) {
-				return nil
-			}
-			return err
-		}
+	if m.clusterNamespace == "local" {
+		return nil
+	}
+
+	_, err := m.clusterLister.Get("", m.clusterNamespace)
+	if apierrors.IsNotFound(err) {
+		return nil
+	} else if err != nil {
+		return err
 	}
 
 	nodes, err := m.nodeLister.List(labels.NewSelector())
@@ -705,46 +682,6 @@ func isEqual(data1 map[corev1.ResourceName]resource.Quantity, data2 map[corev1.R
 		}
 	}
 	return true
-}
-
-func (m *nodesSyncer) isClusterRestoring() (bool, error) {
-	cluster, err := m.clusterLister.Get("", m.clusterNamespace)
-	if err != nil {
-		return false, err
-	}
-	if cluster.Status.Driver == "imported" {
-		return false, nil
-	}
-	if strings.HasPrefix(cluster.Name, "c-m-") {
-		// capiClusterCache should not be nil for non-local clusters since we defer
-		// registration until CAPI is ready. Return an error if it is nil.
-		if m.capiClusterCache == nil {
-			logrus.Errorf("[nodessyncer][isClusterRestoring] capiClusterCache is nil for non-local cluster %s", cluster.Name)
-			return false, errors.Errorf("capiClusterCache is nil for non-local cluster %s", cluster.Name)
-		}
-		provCluster, err := m.provClusterCache.Get(cluster.Spec.FleetWorkspaceName, cluster.Spec.DisplayName)
-		if err != nil {
-			return false, err
-		}
-		capiCluster, err := m.capiClusterCache.Get(provCluster.Namespace, provCluster.Name)
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if capiCluster.Spec.ControlPlaneRef.Kind != "RKEControlPlane" || capiCluster.Spec.ControlPlaneRef.APIGroup != capr.RKEAPIGroup {
-			return false, nil
-		}
-		controlplane, err := m.rkeControlPlaneCache.Get(capiCluster.Namespace, capiCluster.Spec.ControlPlaneRef.Name)
-		if err != nil {
-			return false, err
-		}
-		phase := controlplane.Status.ETCDSnapshotRestorePhase
-		return phase != "" && phase != rkev1.ETCDSnapshotPhaseFinished && phase != rkev1.ETCDSnapshotPhaseFailed, nil
-	}
-
-	return false, nil
 }
 
 func determineNodeRoles(machine *apimgmtv3.Node) {
