@@ -20,7 +20,6 @@ import (
 	util "github.com/rancher/rancher/pkg/cluster"
 	"github.com/rancher/rancher/pkg/clustermanager"
 	crt "github.com/rancher/rancher/pkg/controllers/dashboard/clusterregistrationtoken"
-	"github.com/rancher/rancher/pkg/controllers/management/clusterconnected"
 	"github.com/rancher/rancher/pkg/controllers/management/imported"
 	"github.com/rancher/rancher/pkg/controllers/managementuser/healthsyncer"
 	rancherFeatures "github.com/rancher/rancher/pkg/features"
@@ -167,7 +166,7 @@ func (cd *clusterDeploy) doSync(cluster *apimgmtv3.Cluster) error {
 	// Everything below talks to the downstream cluster, so wait for the agent tunnel. Connected
 	// is derived from that tunnel and not from how the cluster was created, so this applies
 	// uniformly to node-driver, custom, imported and hosted clusters.
-	if !clusterconnected.Connected.IsTrue(cluster) {
+	if !apimgmtv3.ClusterConditionConnected.IsTrue(cluster) {
 		logrus.Tracef("clusterDeploy: doSync: cluster [%s] agent is not connected", cluster.Name)
 		return nil
 	}
@@ -191,6 +190,7 @@ func (cd *clusterDeploy) doSync(cluster *apimgmtv3.Cluster) error {
 	logrus.Tracef("clusterDeploy: doSync: found [%d] nodes for cluster [%s]", len(nodes), cluster.Name)
 
 	if len(nodes) == 0 {
+		apimgmtv3.ClusterConditionAgentDeployed.Message(cluster, "waiting for nodes")
 		return nil
 	}
 

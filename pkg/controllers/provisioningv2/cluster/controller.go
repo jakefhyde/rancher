@@ -23,7 +23,6 @@ import (
 	"github.com/rancher/rancher/pkg/provisioningv2/kubeconfig"
 	"github.com/rancher/rancher/pkg/settings"
 	"github.com/rancher/rancher/pkg/wrangler"
-	"github.com/rancher/wrangler/v3/pkg/condition"
 	corecontrollers "github.com/rancher/wrangler/v3/pkg/generated/controllers/core/v1"
 	"github.com/rancher/wrangler/v3/pkg/generic"
 	"github.com/rancher/wrangler/v3/pkg/kstatus"
@@ -707,7 +706,7 @@ func (h *handler) updateStatus(objs []runtime.Object, cluster *v1.Cluster, statu
 	} else if err == nil {
 		// Create crtbs only after downstream cluster connection is established to avoid cluster not found errors.
 		// Can no longer use Ready as Ready reflects provisioning cluster status and provisioning cluster is not ready until the crtbs are created, which creates a catch-22.
-		if condition.Cond("Connected").IsTrue(existing) {
+		if v3.ClusterConditionConnected.IsTrue(existing) {
 			ready = true
 		}
 		status.AgentDeployed = v3.ClusterConditionAgentDeployed.IsTrue(existing)

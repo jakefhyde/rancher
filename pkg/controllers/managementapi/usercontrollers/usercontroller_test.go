@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
-	"github.com/rancher/rancher/pkg/controllers/management/clusterconnected"
 	"github.com/rancher/wrangler/v3/pkg/generic/fake"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -23,7 +22,7 @@ import (
 // cluster that is Connected but not Provisioned is not a state worth asserting against.
 func markStartable(cluster *v3.Cluster) {
 	v3.ClusterConditionProvisioned.True(cluster)
-	clusterconnected.Connected.True(cluster)
+	v3.ClusterConditionConnected.True(cluster)
 }
 
 func newMockUserControllersController(t *testing.T, starter *simpleControllerStarter) (*userControllersController, *fake.MockNonNamespacedClientInterface[*v3.Cluster, *v3.ClusterList]) {

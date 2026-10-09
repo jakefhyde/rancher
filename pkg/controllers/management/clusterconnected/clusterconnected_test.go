@@ -174,6 +174,6 @@ func TestCheckClusterDoesNotSuppressPreBootstrap(t *testing.T) {
 
 	require.NoError(t, c.checkCluster(cluster))
 	require.NotNil(t, got, "checkCluster must write the condition")
-	assert.True(t, Connected.IsTrue(got),
+	assert.True(t, v3.ClusterConditionConnected.IsTrue(got),
 		"a pre-bootstrapping cluster whose agent is connected must be reported as connected")
 }

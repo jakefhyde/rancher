@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/Masterminds/semver/v3"
-	rancherv1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
+	apimgmtv3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
+	provv1 "github.com/rancher/rancher/pkg/apis/provisioning.cattle.io/v1"
 	"github.com/rancher/rancher/pkg/capr"
 	"github.com/rancher/rancher/pkg/controllers/dashboard/clusterregistrationtoken"
-	"github.com/rancher/rancher/pkg/controllers/management/clusterconnected"
 	fleetconst "github.com/rancher/rancher/pkg/fleet"
 	fleetcontrollers "github.com/rancher/rancher/pkg/generated/controllers/fleet.cattle.io/v1alpha1"
-	v3 "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
+	managementcontrollers "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	provisioningcontrollers "github.com/rancher/rancher/pkg/generated/controllers/provisioning.cattle.io/v1"
 	v1 "github.com/rancher/rancher/pkg/generated/controllers/rke.cattle.io/v1"
 	namespaces "github.com/rancher/rancher/pkg/namespace"
@@ -61,12 +61,12 @@ var (
 )
 
 type handler struct {
-	mgmtClusterCache          v3.ClusterCache
-	clusterRegistrationTokens v3.ClusterRegistrationTokenCache
+	mgmtClusterCache          managementcontrollers.ClusterCache
+	clusterRegistrationTokens managementcontrollers.ClusterRegistrationTokenCache
 	bundles                   fleetcontrollers.BundleController
 	cluster                   provisioningcontrollers.ClusterController
 	rkeControlPlanes          v1.RKEControlPlaneController
-	managedCharts             v3.ManagedChartController
+	managedCharts             managementcontrollers.ManagedChartController
 	secrets                   corev1controllers.SecretController
 }
 
@@ -88,7 +88,7 @@ func Register(ctx context.Context, clients *wrangler.CAPIContext) {
 // InstallSystemAgentUpgrader ensures that the resources required to upgrade the system-agent in the target cluster
 // are deployed and kept up to date. It uses Wrangler's Apply mechanism to manage the resources and leverages
 // the hash of the rendered templates to avoid redundant calls to the downstream cluster's API server.
-func (h *handler) InstallSystemAgentUpgrader(_ string, cluster *rancherv1.Cluster) (*rancherv1.Cluster, error) {
+func (h *handler) InstallSystemAgentUpgrader(_ string, cluster *provv1.Cluster) (*provv1.Cluster, error) {
 	if cluster == nil || cluster.DeletionTimestamp != nil {
 		return cluster, nil
 	}
@@ -121,7 +121,7 @@ func (h *handler) InstallSystemAgentUpgrader(_ string, cluster *rancherv1.Cluste
 	// flow has completed. This used to fall out of Connected being forced false during
 	// pre-bootstrap; Connected is now an honest statement about the agent tunnel, so the
 	// pre-bootstrap rule is stated here explicitly.
-	if !clusterconnected.Connected.IsTrue(mgmtCluster) || capr.ShouldPreBootstrap(mgmtCluster) {
+	if !apimgmtv3.ClusterConditionConnected.IsTrue(mgmtCluster) || capr.ShouldPreBootstrap(mgmtCluster) {
 		return cluster, nil
 	}
 
@@ -257,7 +257,7 @@ func (h *handler) InstallSystemAgentUpgrader(_ string, cluster *rancherv1.Cluste
 
 // installer generates the Plans and corresponding Kubernetes resources required for
 // deploying and running the system-agent-upgrader
-func installer(cluster *rancherv1.Cluster, secretName string) []runtime.Object {
+func installer(cluster *provv1.Cluster, secretName string) []runtime.Object {
 	upgradeImage := strings.SplitN(settings.SystemAgentUpgradeImage.Get(), ":", 2)
 	version := SystemAgentUpgraderVersion()
 
@@ -422,7 +422,7 @@ func installer(cluster *rancherv1.Cluster, secretName string) []runtime.Object {
 	return append(plans, objs...)
 }
 
-func winsUpgradePlan(cluster *rancherv1.Cluster, env []corev1.EnvVar, secretName string) *upgradev1.Plan {
+func winsUpgradePlan(cluster *provv1.Cluster, env []corev1.EnvVar, secretName string) *upgradev1.Plan {
 	winsUpgradeImage := strings.SplitN(settings.WinsAgentUpgradeImage.Get(), ":", 2)
 	winsVersion := "latest"
 	if len(winsUpgradeImage) == 2 {
@@ -493,7 +493,7 @@ func toStringPointer(x string) *string {
 // UninstallFleetBasedApps handles the removal of Fleet Bundles for both the managed-system-agent and
 // managed-system-upgrade-controller, and also takes care of removing the AppliedSystemAgentUpgraderHashAnnotation
 // annotation in a specific scenario.
-func (h *handler) UninstallFleetBasedApps(_ string, cluster *rancherv1.Cluster) (*rancherv1.Cluster, error) {
+func (h *handler) UninstallFleetBasedApps(_ string, cluster *provv1.Cluster) (*provv1.Cluster, error) {
 	if cluster == nil || cluster.DeletionTimestamp != nil {
 		return cluster, nil
 	}
@@ -521,7 +521,7 @@ func (h *handler) UninstallFleetBasedApps(_ string, cluster *rancherv1.Cluster) 
 	// flow has completed. This used to fall out of Connected being forced false during
 	// pre-bootstrap; Connected is now an honest statement about the agent tunnel, so the
 	// pre-bootstrap rule is stated here explicitly.
-	if !clusterconnected.Connected.IsTrue(mgmtCluster) || capr.ShouldPreBootstrap(mgmtCluster) {
+	if !apimgmtv3.ClusterConditionConnected.IsTrue(mgmtCluster) || capr.ShouldPreBootstrap(mgmtCluster) {
 		return cluster, nil
 	}
 

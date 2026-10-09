@@ -9,7 +9,6 @@ import (
 	"github.com/rancher/norman/types"
 	v3 "github.com/rancher/rancher/pkg/apis/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/clustermanager"
-	"github.com/rancher/rancher/pkg/controllers/management/clusterconnected"
 	"github.com/rancher/rancher/pkg/features"
 	controllers "github.com/rancher/rancher/pkg/generated/controllers/management.cattle.io/v3"
 	"github.com/rancher/rancher/pkg/types/config"
@@ -123,7 +122,7 @@ func (u *userControllersController) sync(key string, cluster *v3.Cluster) (*v3.C
 	//
 	// Neither of these cares how the cluster was created. Connected is derived from the agent's
 	// tunnel session, which every cluster type establishes identically.
-	if !v3.ClusterConditionProvisioned.IsTrue(cluster) || !clusterconnected.Connected.IsTrue(cluster) {
+	if !v3.ClusterConditionProvisioned.IsTrue(cluster) || !v3.ClusterConditionConnected.IsTrue(cluster) {
 		return cluster, nil
 	}
 
@@ -211,7 +210,7 @@ func (u *userControllersController) reconcileClusterOwnership() error {
 		// Same preconditions as sync above.
 		if cluster.DeletionTimestamp != nil ||
 			!v3.ClusterConditionProvisioned.IsTrue(cluster) ||
-			!clusterconnected.Connected.IsTrue(cluster) {
+			!v3.ClusterConditionConnected.IsTrue(cluster) {
 			continue
 		}
 

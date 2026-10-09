@@ -12,6 +12,7 @@ import (
 	gkev1 "github.com/rancher/gke-operator/pkg/apis/gke.cattle.io/v1"
 	"github.com/rancher/norman/condition"
 	"github.com/rancher/norman/types"
+	wcondition "github.com/rancher/wrangler/v3/pkg/condition"
 	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,7 +41,6 @@ const (
 	ClusterConditionPending         condition.Cond = "Pending"
 	ClusterConditionCertsGenerated  condition.Cond = "CertsGenerated"
 	ClusterConditionEtcd            condition.Cond = "etcd"
-	ClusterConditionPreBootstrapped condition.Cond = "PreBootstrapped"
 	ClusterConditionProvisioned     condition.Cond = "Provisioned"
 	ClusterConditionUpdated         condition.Cond = "Updated"
 	ClusterConditionUpgraded        condition.Cond = "Upgraded"
@@ -61,7 +61,6 @@ const (
 	ClusterConditionSystemNamespacesAssigned             condition.Cond = "SystemNamespacesAssigned"
 	ClusterConditionAddonDeploy                          condition.Cond = "AddonDeploy"
 	ClusterConditionSystemAccountCreated                 condition.Cond = "SystemAccountCreated"
-	ClusterConditionAgentDeployed                        condition.Cond = "AgentDeployed"
 	ClusterConditionGlobalAdminsSynced                   condition.Cond = "GlobalAdminsSynced"
 	ClusterConditionInitialRolesPopulated                condition.Cond = "InitialRolesPopulated"
 	ClusterConditionServiceAccountMigrated               condition.Cond = "ServiceAccountMigrated"
@@ -71,6 +70,25 @@ const (
 	ClusterConditionHarvesterCloudProviderConfigMigrated condition.Cond = "HarvesterCloudProviderConfigMigrated"
 	ClusterConditionACISecretsMigrated                   condition.Cond = "ACISecretsMigrated"
 	ClusterConditionRKESecretsMigrated                   condition.Cond = "RKESecretsMigrated"
+
+	// ClusterConditionPreBootstrapped is reported when the cluster has successfully performed pre-bootstrapping. 
+	ClusterConditionPreBootstrapped condition.Cond = "PreBootstrapped"
+
+	// ClusterConditionRegistered is reported true when the cluster agent successfully connects to Rancher for the first
+	// time and the downstream API server can be reached.
+	ClusterConditionRegistered = wcondition.Cond("Registered")
+
+	// ClusterConditionAgentConnected is reported true when the cluster agent is successfully connected to Rancher and
+	// the downstream API server can be reached.
+	ClusterConditionAgentConnected = wcondition.Cond("AgentConnected")
+
+	// ClusterConditionConnected is reported when the "stv-" session is established and the downstream cluster can
+	// respond to steve API calls.
+	ClusterConditionConnected = wcondition.Cond("Connected")
+
+	// ClusterConditionAgentDeployed is reported when the clusterDeploy handler has either succeeded or failed to apply
+	// the cluster agent yaml manifest.
+	ClusterConditionAgentDeployed condition.Cond = "AgentDeployed"
 
 	ClusterDriverImported = "imported"
 	ClusterDriverLocal    = "local"
@@ -234,7 +252,7 @@ type ClusterStatus struct {
 	AppliedWebhookDeploymentCustomization      *WebhookDeploymentCustomization `json:"appliedWebhookDeploymentCustomization,omitempty"`
 
 	// ReadyReconciling indicates that the cluster's readiness state is currently being managed by provisioning controller.
-	// Currently used only for v2prov clusters. When true, secondary health controllers (like HealthSyncer, Connected) should avoid updating Ready condition to prevent state flapping.
+	// Currently used only for v2prov clusters. When true, secondary health controllers (like HealthSyncer, ClusterConditionConnected) should avoid updating Ready condition to prevent state flapping.
 	ReadyReconciling bool         `json:"readyReconciling,omitempty"`
 	Info             *ClusterInfo `json:"info,omitempty"`
 }
